@@ -1,0 +1,40 @@
+{
+  "platform" : "paper",
+  "apiVersion" : "1.21.8-R0.1-20250906.215025-55",
+  "declarations" : {
+    "expected" : 2165,
+    "emitted" : 2165,
+    "percent" : 100
+  },
+  "members" : {
+    "expected" : 30370,
+    "emitted" : 30370,
+    "percent" : 100
+  },
+  "events" : {
+    "expected" : 422,
+    "emitted" : 422,
+    "percent" : 100
+  },
+  "exceptions" : {
+    "expected" : 306,
+    "emitted" : 306,
+    "percent" : 100
+  },
+  "packets" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "packetRegistrations" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "packetRegistrationIds" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "exclusions" : [ ]
+}

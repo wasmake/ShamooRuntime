@@ -7,6 +7,13 @@ Versioning after its first release.
 
 ### Added
 
+- Phase 7/8 ASM artifact scanning, deterministic bridge descriptors, generated event registries, explicit exclusions,
+  and 100% supported-surface coverage reports for pinned Paper, Velocity, and their Adventure API versions.
+- Owned Paper live-event, command-map, Folia scheduler, plugin messaging, and Adventure-compatible adapters.
+- Velocity continuation-aware live events, Brigadier/simple/raw commands, asynchronous scheduling, messaging, backend
+  routing, and Adventure-compatible adapters.
+- Exact-version Paper NMS packet descriptor generation and permission-gated Netty interception with opaque live packet
+  handles, cancellation/replacement, bounded dispatch, event-loop safety, and deterministic cleanup.
 - Phase 6 secure plugin discovery with stable-file checks, strict descriptors, SHA-256 inventories, path defenses,
   immutable installed candidates, and a staging boundary.
 - Central thread-safe plugin lifecycle state machine, correlated transition history, structured phase failures,

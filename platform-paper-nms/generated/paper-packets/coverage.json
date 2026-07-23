@@ -1,0 +1,40 @@
+{
+  "platform" : "paper-packets",
+  "apiVersion" : "1.21.8+paper.55+mache.2",
+  "declarations" : {
+    "expected" : 219,
+    "emitted" : 219,
+    "percent" : 100
+  },
+  "members" : {
+    "expected" : 1811,
+    "emitted" : 1811,
+    "percent" : 100
+  },
+  "events" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "exceptions" : {
+    "expected" : 3,
+    "emitted" : 3,
+    "percent" : 100
+  },
+  "packets" : {
+    "expected" : 219,
+    "emitted" : 219,
+    "percent" : 100
+  },
+  "packetRegistrations" : {
+    "expected" : 244,
+    "emitted" : 244,
+    "percent" : 100
+  },
+  "packetRegistrationIds" : {
+    "expected" : 244,
+    "emitted" : 244,
+    "percent" : 100
+  },
+  "exclusions" : [ ]
+}

@@ -4,6 +4,8 @@ import dev.shamoo.runtime.core.PluginRuntime;
 import dev.shamoo.runtime.core.PluginRuntimeContext;
 import dev.shamoo.runtime.core.PluginRuntimeFactory;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import dev.shamoo.runtime.core.CompiledBindingMetadata;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -36,11 +38,24 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
     public CompletionStage<PluginRuntime> create(PluginRuntimeContext context) {
         Objects.requireNonNull(context, "context");
         try {
+            Map<String, HostFunction> hostBindings = new LinkedHashMap<>(bindings.apply(context));
+            context.platformCapabilities().operations().forEach((name, operation) -> {
+                HostFunction previous = hostBindings.putIfAbsent(name, arguments -> {
+                    if (arguments.isEmpty() || !(arguments.getFirst() instanceof Map<?, ?> metadata)) {
+                        throw new IllegalArgumentException(name + " requires compiled binding metadata");
+                    }
+                    return operation.invoke(context.candidate().pluginId(), CompiledBindingMetadata.from(metadata),
+                            arguments.subList(1, arguments.size()));
+                });
+                if (previous != null) {
+                    throw new IllegalArgumentException("duplicate platform host binding: " + name);
+                }
+            });
             ShamooNodeRuntime runtime = manager.create(
                     context.candidate().pluginId(),
                     context.candidate().root(),
                     context.candidate().descriptor().node(),
-                    Map.copyOf(bindings.apply(context)),
+                    Map.copyOf(hostBindings),
                     options,
                     reporters.apply(context));
             PluginRuntime hooks = Objects.requireNonNull(lifecycle.apply(context, runtime), "lifecycle result");

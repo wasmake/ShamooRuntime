@@ -1,0 +1,11 @@
+{
+  "minecraftVersion": "1.21.8",
+  "paperBuild": 55,
+  "paperApi": "1.21.8-R0.1-20250906.215025-55",
+  "paperweight": "2.0.0-beta.21",
+  "mache": "1.21.8+build.2",
+  "mapping": "mojang",
+  "mappedServerSha256": "56146a5282b5fc25fc1132f1195b6b50751b34323f0201fe175764f30f0b3be4",
+  "packetModelSha256": "bd1ab22deba93303194434de35d109ccb6f63c20ecd2b1e32b17bca35df87350",
+  "pipelineAnchor": "packet_handler"
+}

@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.shamoo.runtime.core.DirectRuntimeHost;
 import dev.shamoo.runtime.core.RuntimeInitializationException;
+import dev.shamoo.runtime.core.PlatformCapabilities;
+import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.protocol.ScriptRequest;
 import dev.shamoo.runtime.protocol.ScriptResult;
 import java.time.Duration;
@@ -69,6 +71,21 @@ class JavetScriptRuntimeTest {
             CompletionException failure = assertThrows(CompletionException.class,
                 rejected::join);
             assertInstanceOf(RuntimeQueueFullError.class, failure.getCause());
+        }
+    }
+
+    @Test
+    void exposesOnlyMetadataCheckedPlatformCapabilities() throws RuntimeInitializationException {
+        PlatformCapabilities capabilities = new PlatformCapabilities(Map.of("registerEvent",
+                (owner, metadata, arguments) -> owner + ":" + metadata.typeName() + ":" + arguments.getFirst()));
+        try (JavetScriptRuntime runtime = new JavetScriptRuntime(
+                host, new PluginId("fixture"), capabilities)) {
+            ScriptResult accepted = execute(runtime, "capability", "host.registerEvent({namespace: 'paper', "
+                    + "typeName: 'JoinEvent', protocolMajor: 1, protocolMinor: 0}, 'ok')").join();
+            ScriptResult rejected = execute(runtime, "raw-capability", "host.registerEvent('raw')").join();
+
+            assertEquals("fixture:JoinEvent:ok", accepted.value());
+            assertEquals(ScriptResult.Status.FAILURE, rejected.status());
         }
     }
 

@@ -3,12 +3,17 @@ java = "21"
 javet = "5.0.9"
 swc4j = "2.1.0"
 paper = "1.21.8-R0.1-20250906.215025-55"
-velocity = "3.4.0-20260121.190037-118"
+velocity = "3.4.0"
+paper-adventure = "4.24.0"
+velocity-adventure = "4.26.1"
 junit = "6.1.2"
 checkstyle = "12.1.2"
 pmd = "7.17.0"
 spotbugs = "4.9.6"
 spotbugs-plugin = "6.5.9"
+asm = "9.8"
+netty = "4.1.118.Final"
+paperweight = "2.0.0-beta.21"
 jackson = "2.20.1"
 semver4j = "6.0.0"
 
@@ -23,6 +28,11 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 semver4j = { module = "org.semver4j:semver4j", version.ref = "semver4j" }
+asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
+paper-adventure-api = { module = "net.kyori:adventure-api", version.ref = "paper-adventure" }
+velocity-adventure-api = { module = "net.kyori:adventure-api", version.ref = "velocity-adventure" }
+netty-transport = { module = "io.netty:netty-transport", version.ref = "netty" }
 
 [plugins]
 spotbugs = { id = "com.github.spotbugs", version.ref = "spotbugs-plugin" }
+paperweight-userdev = { id = "io.papermc.paperweight.userdev", version.ref = "paperweight" }
