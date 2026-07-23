@@ -2,9 +2,10 @@
 
 ShamooRuntime is a Java 21 foundation for embedding a JavaScript runtime in Paper and Velocity plugins. The runtime
 defines module and lifecycle boundaries, separately packaged platform adapters, the plugin manifest protocol, and a
-Phase 5 per-plugin Javet Node runtime foundation. Manifest v1 provides strict JSON decoding, immutable policy models,
-semantic-version negotiation, and admission validation. Each plugin Node isolate has a confined owner thread, bounded
-queue, controlled virtual modules and callbacks, deny-by-default policy, structured errors, and deterministic cleanup.
+Phase 6 plugin lifecycle foundation. Manifest v1 provides strict JSON decoding, immutable policy models,
+semantic-version negotiation, and admission validation. Secure discovery, deterministic dependency ordering,
+serialized hooks, invocation draining, quarantine, and typed resource ownership coordinate each confined plugin Node
+isolate without exposing Javet through core APIs.
 
 ## Requirements
 
@@ -38,7 +39,7 @@ packaging are intentionally deferred until runtime loading policy is defined.
 | Module | Responsibility |
 | --- | --- |
 | `runtime-protocol` | Versioned requests, plugin manifests, and compatibility negotiation |
-| `runtime-core` | Platform-neutral runtime, host contracts, and manifest admission |
+| `runtime-core` | Discovery, dependency graph, lifecycle coordination, resources, and host contracts |
 | `runtime-javet` | Per-plugin Javet Node implementation, policy boundary, event loop, and native lifecycle |
 | `runtime-codegen-support` | Binding annotations and generated metadata validation |
 | `platform-paper` | Paper scheduler/logging adapter |
@@ -48,8 +49,9 @@ packaging are intentionally deferred until runtime loading policy is defined.
 | `integration-paper` | Paper runtime smoke-probe support |
 | `integration-velocity` | Velocity runtime smoke-probe support |
 
-See [`docs/protocol.md`](docs/protocol.md), [`docs/runtime.md`](docs/runtime.md), [`docs/architecture.md`](docs/architecture.md), and
-[`docs/adr`](docs/adr) for wire, dependency, and lifecycle decisions.
+See [`docs/protocol.md`](docs/protocol.md), [`docs/runtime.md`](docs/runtime.md),
+[`docs/lifecycle.md`](docs/lifecycle.md), [`docs/architecture.md`](docs/architecture.md), and [`docs/adr`](docs/adr) for
+wire, dependency, and lifecycle decisions.
 
 The in-process runtime is defense in depth, not an OS security sandbox. Unsupported native Node capabilities remain
 denied even when a manifest requests them. See [`SECURITY.md`](SECURITY.md) for the threat boundary.

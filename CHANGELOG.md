@@ -7,6 +7,15 @@ Versioning after its first release.
 
 ### Added
 
+- Phase 6 secure plugin discovery with stable-file checks, strict descriptors, SHA-256 inventories, path defenses,
+  immutable installed candidates, and a staging boundary.
+- Central thread-safe plugin lifecycle state machine, correlated transition history, structured phase failures,
+  serialized timed hooks, invocation admission and draining, explicit retries, and quarantine policy.
+- Deterministic required/optional semver dependency graph with ordering hints, canonical cycle paths, block reasons,
+  compatibility reevaluation, dependency-first enable, and dependent-first disable.
+- Typed plugin-owned resource registrations, reverse cleanup, aggregated cleanup failures, retryable leak reports, and
+  immutable lifecycle, dependency, resource, invocation, and metrics introspection snapshots.
+- Engine-neutral lifecycle factory and hook interfaces with a `runtime-javet` manager adapter.
 - Phase 5 one-Node-runtime-per-plugin manager with isolated globals and module caches.
 - Dedicated owner-thread confinement, bounded invocation backpressure, measured metrics, and deterministic shutdown.
 - Controlled ESM/CommonJS virtual modules, promise and Node event-loop driving, direct allow-listed host callbacks,
