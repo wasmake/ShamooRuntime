@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shamoo.dev/schema/plugin-manifest-v1.schema.json",
+  "title": "Shamoo plugin manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "displayName", "version", "shamoo", "platforms", "dependencies", "node", "reload"],
+  "properties": {
+    "name": { "$ref": "#/$defs/pluginId" },
+    "displayName": { "$ref": "#/$defs/nonWhitespace" },
+    "version": { "$ref": "#/$defs/semver" },
+    "shamoo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api", "runtime", "manifest"],
+      "properties": {
+        "api": { "$ref": "#/$defs/semverRange" },
+        "runtime": { "$ref": "#/$defs/semverRange" },
+        "manifest": { "const": 1 }
+      }
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paper", "velocity"],
+      "properties": {
+        "paper": { "$ref": "#/$defs/paperTarget" },
+        "velocity": { "$ref": "#/$defs/velocityTarget" }
+      },
+      "anyOf": [
+        { "properties": { "paper": { "properties": { "enabled": { "const": true } } } } },
+        { "properties": { "velocity": { "properties": { "enabled": { "const": true } } } } }
+      ]
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "optional", "loadBefore", "loadAfter"],
+      "properties": {
+        "required": { "$ref": "#/$defs/dependencyMap" },
+        "optional": { "$ref": "#/$defs/dependencyMap" },
+        "loadBefore": { "$ref": "#/$defs/pluginIdList" },
+        "loadAfter": { "$ref": "#/$defs/pluginIdList" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["builtins", "filesystem", "network", "workers", "childProcess", "nativeAddons"],
+      "properties": {
+        "builtins": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^(node:)?[a-z][a-z0-9_/-]*$" } },
+        "filesystem": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["read", "write"],
+          "properties": {
+            "read": { "$ref": "#/$defs/pathList" },
+            "write": { "$ref": "#/$defs/pathList" }
+          }
+        },
+        "network": { "type": "boolean" },
+        "workers": { "type": "boolean" },
+        "childProcess": { "type": "boolean" },
+        "nativeAddons": { "type": "boolean" }
+      }
+    },
+    "reload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["watch", "debounceMs", "preserveState"],
+      "properties": {
+        "watch": { "type": "boolean" },
+        "debounceMs": { "type": "integer", "minimum": 0, "maximum": 60000 },
+        "preserveState": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "nonWhitespace": { "type": "string", "pattern": "^[\\s\\S]*[^\\s][\\s\\S]*$" },
+    "semver": {
+      "type": "string",
+      "format": "semver",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "semverRange": { "type": "string", "format": "semver-range", "pattern": "^[\\s\\S]*[^\\s][\\s\\S]*$" },
+    "pluginId": { "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9]*([._-][a-z0-9]+)*$" },
+    "entrypoint": { "type": "string", "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*\\u0000)(?!\\.$)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:/)\\.(?:/|$))(?!.*//)(?:\\./)?[^/]+(?:/[^/]+)*\\.(?:js|mjs|cjs)$" },
+    "relativePath": {
+      "anyOf": [
+        { "const": "./" },
+        { "type": "string", "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*\\u0000)(?!\\.$)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:/)\\.(?:/|$))(?!.*//)(?:\\./)?[^/]+(?:/[^/]+)*$" }
+      ]
+    },
+    "pathList": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/relativePath" } },
+    "pluginIdList": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/pluginId" } },
+    "dependencyMap": { "type": "object", "propertyNames": { "$ref": "#/$defs/pluginId" }, "additionalProperties": { "$ref": "#/$defs/semverRange" } },
+    "paperTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "entrypoint": { "$ref": "#/$defs/entrypoint" },
+        "minecraft": { "$ref": "#/$defs/semverRange" },
+        "paperApi": { "$ref": "#/$defs/semverRange" }
+      },
+      "if": { "properties": { "enabled": { "const": true } } },
+      "then": { "required": ["entrypoint", "minecraft", "paperApi"] }
+    },
+    "velocityTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "entrypoint": { "$ref": "#/$defs/entrypoint" },
+        "velocityApi": { "$ref": "#/$defs/semverRange" }
+      },
+      "if": { "properties": { "enabled": { "const": true } } },
+      "then": { "required": ["entrypoint", "velocityApi"] }
+    }
+  }
+}
