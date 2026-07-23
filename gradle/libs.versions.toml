@@ -14,7 +14,7 @@ semver4j = "6.0.0"
 
 [libraries]
 javet = { module = "com.caoccao.javet:javet", version.ref = "javet" }
-javet-v8-linux = { module = "com.caoccao.javet:javet-v8-linux-x86_64", version.ref = "javet" }
+javet-node-linux = { module = "com.caoccao.javet:javet-node-linux-x86_64", version.ref = "javet" }
 swc4j = { module = "com.caoccao.javet:swc4j", version.ref = "swc4j" }
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
 velocity-api = { module = "com.velocitypowered:velocity-api", version.ref = "velocity" }
