@@ -1,0 +1,6 @@
+name: ShamooRuntime
+version: 0.1.0-SNAPSHOT
+main: dev.shamoo.runtime.bootstrap.paper.ShamooPaperPlugin
+api-version: '1.21'
+description: JavaScript runtime foundation for Paper
+authors: [ShamooRuntime contributors]
