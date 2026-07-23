@@ -1,0 +1,6 @@
+packets:
+  enabled: false
+  process-smoke: false
+  allowed-plugins: []
+  timeout-millis: 50
+  maximum-pending: 256

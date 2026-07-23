@@ -4,6 +4,8 @@ import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.core.RuntimeHost;
 import dev.shamoo.runtime.core.RuntimeInitializationException;
 import dev.shamoo.runtime.core.ScriptRuntime;
+import dev.shamoo.runtime.core.PlatformCapabilities;
+import dev.shamoo.runtime.core.CompiledBindingMetadata;
 import dev.shamoo.runtime.protocol.FilesystemPolicy;
 import dev.shamoo.runtime.protocol.NodePolicy;
 import dev.shamoo.runtime.protocol.ProtocolVersion;
@@ -25,20 +27,41 @@ public final class JavetScriptRuntime implements ScriptRuntime {
     private final ShamooNodeRuntime delegate;
 
     public JavetScriptRuntime(RuntimeHost host) throws RuntimeInitializationException {
-        this(host, ShamooNodeRuntimeOptions.DEFAULT);
+        this(host, ShamooNodeRuntimeOptions.DEFAULT, PlatformCapabilities.NONE, null);
     }
 
     JavetScriptRuntime(RuntimeHost host, ShamooNodeRuntimeOptions options) throws RuntimeInitializationException {
+        this(host, options, PlatformCapabilities.NONE, null);
+    }
+
+    public JavetScriptRuntime(RuntimeHost host, PluginId owner, PlatformCapabilities capabilities)
+            throws RuntimeInitializationException {
+        this(host, ShamooNodeRuntimeOptions.DEFAULT, capabilities, Objects.requireNonNull(owner, "owner"));
+    }
+
+    private JavetScriptRuntime(RuntimeHost host, ShamooNodeRuntimeOptions options, PlatformCapabilities capabilities,
+            PluginId suppliedOwner) throws RuntimeInitializationException {
         this.host = Objects.requireNonNull(host, "host");
         NodePolicy policy = new NodePolicy(
             List.of(), new FilesystemPolicy(List.of(), List.of()), false, false, false, false);
         try {
+            PluginId owner = suppliedOwner == null ? new PluginId(
+                    "bootstrap-" + host.platformName().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-"))
+                    : suppliedOwner;
+            Map<String, HostFunction> bindings = new java.util.LinkedHashMap<>();
+            Objects.requireNonNull(capabilities, "capabilities").operations().forEach((name, operation) ->
+                    bindings.put(name, arguments -> {
+                if (arguments.isEmpty() || !(arguments.getFirst() instanceof Map<?, ?> metadata)) {
+                    throw new IllegalArgumentException(name + " requires compiled binding metadata");
+                }
+                return operation.invoke(owner, CompiledBindingMetadata.from(metadata),
+                        arguments.subList(1, arguments.size()));
+                    }));
             delegate = ShamooNodeRuntime.create(
-                new PluginId(
-                    "bootstrap-" + host.platformName().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-")),
+                owner,
                 Path.of("."),
                 policy,
-                Map.of(),
+                bindings,
                 options,
                 error -> host.logger().log(System.Logger.Level.ERROR, error.getMessage(), error));
         } catch (RuntimeCreationError | IllegalArgumentException exception) {

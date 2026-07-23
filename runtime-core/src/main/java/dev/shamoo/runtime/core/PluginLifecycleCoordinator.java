@@ -29,6 +29,7 @@ public final class PluginLifecycleCoordinator {
     private final Duration drainTimeout;
     private final QuarantinePolicy quarantinePolicy;
     private final Executor executor;
+    private final PlatformCapabilities platformCapabilities;
     private final Map<PluginId, ManagedPlugin> plugins = new ConcurrentHashMap<>();
     private final Object lifecycleLock = new Object();
     private CompletableFuture<Void> lifecycleTail = completed();
@@ -42,12 +43,25 @@ public final class PluginLifecycleCoordinator {
             Duration drainTimeout,
             QuarantinePolicy quarantinePolicy,
             Executor executor) {
+        this(runtimeFactory, resources, hookTimeout, drainTimeout, quarantinePolicy, executor,
+                PlatformCapabilities.NONE);
+    }
+
+    public PluginLifecycleCoordinator(
+            PluginRuntimeFactory runtimeFactory,
+            ResourceRegistry resources,
+            Duration hookTimeout,
+            Duration drainTimeout,
+            QuarantinePolicy quarantinePolicy,
+            Executor executor,
+            PlatformCapabilities platformCapabilities) {
         this.runtimeFactory = Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.resources = Objects.requireNonNull(resources, "resources");
         this.hookTimeout = positive(hookTimeout, "hookTimeout");
         this.drainTimeout = positive(drainTimeout, "drainTimeout");
         this.quarantinePolicy = Objects.requireNonNull(quarantinePolicy, "quarantinePolicy");
         this.executor = Objects.requireNonNull(executor, "executor");
+        this.platformCapabilities = Objects.requireNonNull(platformCapabilities, "platformCapabilities");
     }
 
     public DependencyResolution install(Collection<InstalledPluginCandidate> candidates) {
@@ -160,7 +174,8 @@ public final class PluginLifecycleCoordinator {
         }
         plugin.transition(PluginLifecycleState.LOADING, correlationId, "load requested");
         plugin.operations.incrementAndGet();
-        PluginRuntimeContext context = new PluginRuntimeContext(plugin.candidate, resources, plugin.invocations);
+        PluginRuntimeContext context = new PluginRuntimeContext(
+                plugin.candidate, resources, plugin.invocations, platformCapabilities);
         CompletionStage<PluginRuntime> creation;
         try {
             creation = plugin.runtime == null

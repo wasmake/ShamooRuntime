@@ -30,7 +30,7 @@ public final class PaperRuntimeHost implements RuntimeHost {
     public CompletionStage<Void> dispatch(Runnable task) {
         Objects.requireNonNull(task, "task");
         CompletableFuture<Void> result = new CompletableFuture<>();
-        plugin.getServer().getScheduler().runTask(plugin, () -> {
+        plugin.getServer().getGlobalRegionScheduler().execute(plugin, () -> {
             try {
                 task.run();
                 result.complete(null);
