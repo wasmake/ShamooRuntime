@@ -29,14 +29,14 @@ jobs:
         run: ./gradlew build --no-daemon --stacktrace
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verification-reports
           path: '**/build/reports/**'
           if-no-files-found: ignore
           retention-days: 14
       - name: Upload bootstrap artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bootstrap-jars
           path: 'bootstrap-*/build/libs/*.jar'
