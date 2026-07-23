@@ -1,0 +1,40 @@
+{
+  "platform" : "velocity",
+  "apiVersion" : "3.4.0",
+  "declarations" : {
+    "expected" : 358,
+    "emitted" : 358,
+    "percent" : 100
+  },
+  "members" : {
+    "expected" : 2552,
+    "emitted" : 2552,
+    "percent" : 100
+  },
+  "events" : {
+    "expected" : 46,
+    "emitted" : 46,
+    "percent" : 100
+  },
+  "exceptions" : {
+    "expected" : 11,
+    "emitted" : 11,
+    "percent" : 100
+  },
+  "packets" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "packetRegistrations" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "packetRegistrationIds" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "exclusions" : [ ]
+}

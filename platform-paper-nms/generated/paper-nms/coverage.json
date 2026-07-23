@@ -1,0 +1,40 @@
+{
+  "platform" : "paper-nms",
+  "apiVersion" : "1.21.8+paper.55+mache.2",
+  "declarations" : {
+    "expected" : 6004,
+    "emitted" : 6004,
+    "percent" : 100
+  },
+  "members" : {
+    "expected" : 63672,
+    "emitted" : 63672,
+    "percent" : 100
+  },
+  "events" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "exceptions" : {
+    "expected" : 532,
+    "emitted" : 532,
+    "percent" : 100
+  },
+  "packets" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "packetRegistrations" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "packetRegistrationIds" : {
+    "expected" : 0,
+    "emitted" : 0,
+    "percent" : 100
+  },
+  "exclusions" : [ ]
+}

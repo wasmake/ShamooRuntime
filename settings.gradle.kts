@@ -6,7 +6,7 @@ pluginManagement {
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         mavenCentral()
         maven("https://repo.papermc.io/repository/maven-public/") {
@@ -23,6 +23,7 @@ include(
     "runtime-protocol",
     "runtime-codegen-support",
     "platform-paper",
+    "platform-paper-nms",
     "platform-velocity",
     "bootstrap-paper",
     "bootstrap-velocity",
