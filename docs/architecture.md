@@ -19,8 +19,8 @@ roots and own exactly one `ScriptRuntime` from platform initialization through s
 ## Runtime contract
 
 `ScriptRuntime.execute` accepts immutable `ScriptRequest` values and returns asynchronous `ScriptResult` values.
-The protocol major version is the compatibility boundary. A runtime with a matching major and a newer or equal
-minor version can consume older generated binding metadata.
+Protocol compatibility requires a matching major and a runtime minor newer than or equal to the required minor. This
+rule applies to manifest admission against `ProtocolVersion.CURRENT` and to generated binding metadata.
 
 Javet isolate access is serialized through a dedicated single virtual-thread executor. Closing the runtime first
 prevents new submissions, closes V8, and shuts down that executor. Platform work crosses the boundary only through
@@ -33,8 +33,9 @@ Library modules publish normal Java library JARs with source and Javadoc variant
 artifact names and contain only their corresponding platform entry point. They do not combine both platform APIs or
 silently shade native libraries.
 
-## Phase 1 limits
+## Current limits
 
-This foundation does not define sandboxing, user-facing scripting APIs, module loading, TypeScript transformation,
-hot reload, dependency shading, or full server-process test harnesses. Those capabilities require explicit design
-and threat modeling before implementation.
+Manifest v1 describes requested Node and reload policies, and runtime-core validates compatibility at admission.
+This foundation does not enforce those policies or define user-facing scripting APIs, module loading, TypeScript
+transformation, hot reload, dependency shading, or full server-process test harnesses. Those capabilities require
+explicit design and threat modeling before implementation.
