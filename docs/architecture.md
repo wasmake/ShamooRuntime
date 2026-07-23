@@ -14,7 +14,9 @@ runtime-codegen-support  platform-* <- bootstrap-*
 
 `runtime-protocol` and `runtime-core` have no Paper, Velocity, Javet, or swc4j types in their public surface.
 Platform adapters implement `RuntimeHost`; they do not own a script engine. Bootstrap entry points are composition
-roots. `ShamooNodeRuntimeManager` owns one isolated Node runtime per admitted script plugin.
+roots. `PluginLifecycleCoordinator` owns discovery admission, graph ordering, hooks, invocation draining, and resource
+cleanup through core interfaces. `JavetPluginRuntimeFactory` adapts those interfaces to
+`ShamooNodeRuntimeManager`, which owns one isolated Node runtime per admitted script plugin.
 
 ## Runtime contract
 
@@ -29,6 +31,11 @@ operations are denied where the provider cannot supply secure directory streams.
 x86-64 Node native artifact; additional operating systems and CPU architectures require explicit distribution
 variants rather than runtime guessing. See [`runtime.md`](runtime.md) and ADR 0003.
 
+Runtime plugin directories are inventoried only after a stable-file window. Strict descriptors and SHA-256 inventories
+form immutable installed candidates. A deterministic dependency graph controls enable and reverse-disable order.
+Lifecycle calls are serialized per plugin, active invocations drain before disable, and typed plugin-owned resources
+clean up in reverse order. See [`lifecycle.md`](lifecycle.md) and ADR 0004.
+
 ## Artifact boundaries
 
 Library modules publish normal Java library JARs with source and Javadoc variants. The bootstrap modules set distinct
@@ -37,6 +44,7 @@ silently shade native libraries.
 
 ## Current limits
 
-Phase 5 enforces a deny-by-default subset of `NodePolicy` at runtime-controlled boundaries. Native Node paths that
-Javet cannot mediate securely remain disabled even when requested. TypeScript transformation, hot reload, dependency
-installation, distribution shading, and full server-process test harnesses remain outside this phase.
+The runtime enforces a deny-by-default subset of `NodePolicy` at runtime-controlled boundaries. Native Node paths that
+Javet cannot mediate securely remain disabled even when requested. Phase 6 defines staging but not transactional
+candidate swap or rollback. TypeScript transformation, hot reload, dependency installation, distribution shading,
+and full server-process test harnesses remain outside this phase.
