@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a scoped capability or architecture change
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user or engineering problem without prescribing a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Include alternatives and compatibility implications when known.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options: [Runtime, Protocol, Code generation, Paper, Velocity, Build or tooling]
+    validations:
+      required: true
