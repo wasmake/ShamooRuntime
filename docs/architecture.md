@@ -14,7 +14,7 @@ runtime-codegen-support  platform-* <- bootstrap-*
 
 `runtime-protocol` and `runtime-core` have no Paper, Velocity, Javet, or swc4j types in their public surface.
 Platform adapters implement `RuntimeHost`; they do not own a script engine. Bootstrap entry points are composition
-roots and own exactly one `ScriptRuntime` from platform initialization through shutdown.
+roots. `ShamooNodeRuntimeManager` owns one isolated Node runtime per admitted script plugin.
 
 ## Runtime contract
 
@@ -22,10 +22,12 @@ roots and own exactly one `ScriptRuntime` from platform initialization through s
 Protocol compatibility requires a matching major and a runtime minor newer than or equal to the required minor. This
 rule applies to manifest admission against `ProtocolVersion.CURRENT` and to generated binding metadata.
 
-Javet isolate access is serialized through a dedicated single virtual-thread executor. Closing the runtime first
-prevents new submissions, closes V8, and shuts down that executor. Platform work crosses the boundary only through
-`RuntimeHost.dispatch`. Phase 1 wires Javet's Linux x86-64 V8 native artifact; additional operating systems and CPU
-architectures require explicit distribution variants rather than runtime guessing.
+Each Javet Node isolate is created, accessed, pumped, and closed on its own dedicated platform thread. A bounded queue
+provides backpressure and external calls return futures. Virtual ESM and CommonJS loading, direct host callbacks,
+secure descriptor-relative filesystem operations, and immutable permissions form the controlled boundary. Filesystem
+operations are denied where the provider cannot supply secure directory streams. Phase 5 wires Javet's Linux
+x86-64 Node native artifact; additional operating systems and CPU architectures require explicit distribution
+variants rather than runtime guessing. See [`runtime.md`](runtime.md) and ADR 0003.
 
 ## Artifact boundaries
 
@@ -35,7 +37,6 @@ silently shade native libraries.
 
 ## Current limits
 
-Manifest v1 describes requested Node and reload policies, and runtime-core validates compatibility at admission.
-This foundation does not enforce those policies or define user-facing scripting APIs, module loading, TypeScript
-transformation, hot reload, dependency shading, or full server-process test harnesses. Those capabilities require
-explicit design and threat modeling before implementation.
+Phase 5 enforces a deny-by-default subset of `NodePolicy` at runtime-controlled boundaries. Native Node paths that
+Javet cannot mediate securely remain disabled even when requested. TypeScript transformation, hot reload, dependency
+installation, distribution shading, and full server-process test harnesses remain outside this phase.
