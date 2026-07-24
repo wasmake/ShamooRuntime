@@ -94,6 +94,55 @@ class JavetPluginHostTest {
         assertEquals(0, stagingEntries());
     }
 
+    @Test
+    void acceptsCompilerSourceMapMetadata() throws Exception {
+        plugin("mapped", "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
+                "export function enable() {}\n");
+        try (JavetPluginHost host = host(new CopyOnWriteArrayList<>())) {
+            host.start(Duration.ofSeconds(30));
+            assertEquals(1, host.runtimeCount());
+        }
+    }
+
+    @Test
+    void rejectsCorruptMetadataWithoutStoppingValidPlugins() throws Exception {
+        List<String> events = new CopyOnWriteArrayList<>();
+        plugin("valid", "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
+                "export function enable() { host.record('valid-ready'); }\n");
+        Path corrupt = plugin("corrupt",
+                "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
+                "export function enable() {}\n");
+        Files.writeString(corrupt.resolve("shamoo.metadata.json"), "{\"formatVersion\":2}");
+
+        try (JavetPluginHost host = host(events)) {
+            host.start(Duration.ofSeconds(30));
+            assertEquals(1, host.runtimeCount());
+            assertEquals(List.of("valid"), host.snapshots().stream()
+                    .map(snapshot -> snapshot.pluginId().value()).toList());
+            assertEquals(List.of("valid:true", "corrupt:false"), host.pluginStatuses().stream()
+                    .map(status -> status.pluginId().value() + ":" + status.active()).toList());
+            assertTrue(events.contains("valid-ready"));
+            assertEquals(1, stagingEntries());
+        }
+        assertEquals(0, stagingEntries());
+    }
+
+    @Test
+    void isolatesBrokenJavaScriptDuringStartup() throws Exception {
+        List<String> events = new CopyOnWriteArrayList<>();
+        plugin("broken-script", "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
+                "export {");
+        plugin("working-script", "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
+                "export function enable() { host.record('working-ready'); }\n");
+
+        try (JavetPluginHost host = host(events)) {
+            host.start(Duration.ofSeconds(30));
+            assertEquals(List.of("working-script:true", "broken-script:false"), host.pluginStatuses().stream()
+                    .map(status -> status.pluginId().value() + ":" + status.active()).toList());
+            assertTrue(events.contains("working-ready"));
+        }
+    }
+
     private JavetPluginHost host(List<String> events) {
         SemanticVersion runtime = new SemanticVersion("0.1.0");
         CompatibilityInput input = new CompatibilityInput(PlatformKind.PAPER,
@@ -130,7 +179,8 @@ class JavetPluginHostTest {
         Files.writeString(root.resolve("shamoo.metadata.json"), """
                 {"formatVersion":2,"compilerVersion":"test","packageName":"@fixture/%s",
                 "components":[],"modules":[],%s"entrypoints":{"paper":{"source":"src/plugin.ts",
-                "output":"index.mjs"}}}
+                "output":"index.mjs"}},"sourceMaps":[{"generated":"index.mjs","map":"index.mjs.map",
+                "format":"source-map-v3"}]}
                 """.formatted(name, communication));
         return root;
     }

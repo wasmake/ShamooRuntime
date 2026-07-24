@@ -5,6 +5,7 @@ dependencies {
     implementation(project(":platform-velocity"))
     compileOnly(libs.velocity.api)
     compileOnly("com.google.inject:guice:7.0.0")
+    testImplementation(libs.velocity.api)
     annotationProcessor(libs.velocity.api)
 }
 

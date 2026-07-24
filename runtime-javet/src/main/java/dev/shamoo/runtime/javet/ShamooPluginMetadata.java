@@ -92,7 +92,7 @@ public record ShamooPluginMetadata(
 
     private static ShamooPluginMetadata parse(JsonNode root, PluginDescriptor descriptor, PlatformKind platform) {
         object(root, "", Set.of("formatVersion", "compilerVersion", "packageName", "components", "modules",
-                "communication", "permissions", "entrypoints"),
+                "communication", "permissions", "entrypoints", "sourceMaps"),
                 Set.of("formatVersion", "compilerVersion", "packageName", "components", "modules", "entrypoints"));
         if (integer(root, "formatVersion", "") != FORMAT_VERSION) {
             fail("/formatVersion", "must be 2");
@@ -122,6 +122,7 @@ public record ShamooPluginMetadata(
         if (!output.equals(descriptorEntrypoint)) {
             fail("/entrypoints/" + key + "/output", "does not match descriptor entrypoint");
         }
+        validateSourceMaps(root.path("sourceMaps"));
 
         Permissions permissions = parsePermissions(root.path("permissions"));
         validatePermissions(permissions, descriptor.node(), platform);
@@ -187,6 +188,21 @@ public record ShamooPluginMetadata(
                 fail(path + "/global", "must be a boolean");
             }
             location(module.path("location"), path + "/location");
+        }
+    }
+
+    private static void validateSourceMaps(JsonNode values) {
+        if (values.isMissingNode()) {
+            return;
+        }
+        array(values, "/sourceMaps");
+        for (int index = 0; index < values.size(); index++) {
+            JsonNode value = values.get(index);
+            String path = "/sourceMaps/" + index;
+            object(value, path, Set.of("generated", "map", "format"), Set.of("generated", "map", "format"));
+            text(value, "generated", path);
+            text(value, "map", path);
+            enumText(value, "format", path, Set.of("source-map-v3"));
         }
     }
 

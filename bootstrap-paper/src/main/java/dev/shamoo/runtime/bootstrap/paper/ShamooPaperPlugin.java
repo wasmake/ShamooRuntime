@@ -71,6 +71,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
                     Duration.ofMillis(getConfig().getLong("plugins.hook-timeout-millis", 5000)),
                     Duration.ofMillis(getConfig().getLong("plugins.drain-timeout-millis", 5000)),
                     context -> Map.of(), System.getLogger(getClass().getName()));
+            PaperRuntimeCommands.register(this, pluginHost::pluginStatuses);
             pluginHost.start(Duration.ofMillis(getConfig().getLong("plugins.watch-debounce-millis", 500)));
             if (getLogger().isLoggable(Level.INFO)) {
                 getLogger().info("ShamooRuntime initialized with protocol " + ProtocolVersion.CURRENT

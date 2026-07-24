@@ -71,6 +71,8 @@ public final class ShamooVelocityPlugin {
         pluginHost = new JavetPluginHost(directory, compatibility(), platformCapabilities(),
                 Duration.ofMillis(200), Duration.ofSeconds(5), Duration.ofSeconds(5),
                 context -> Map.of(), System.getLogger(getClass().getName()));
+        VelocityRuntimeCommands.register(server, this, commandBridge, pluginHost::pluginStatuses,
+                System.getLogger(getClass().getName()));
         pluginHost.start(Duration.ofMillis(500));
         System.getLogger(getClass().getName()).log(
             System.Logger.Level.INFO, "ShamooRuntime initialized with protocol " + ProtocolVersion.CURRENT
