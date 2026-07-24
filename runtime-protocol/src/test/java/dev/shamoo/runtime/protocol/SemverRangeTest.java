@@ -3,11 +3,22 @@ package dev.shamoo.runtime.protocol;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
+@SuppressWarnings({"PMD.UnitTestContainsTooManyAsserts", "PMD.UnitTestAssertionsShouldIncludeMessage"})
 class SemverRangeTest {
+    @Test
+    void evaluatesCalendarVersionsByTheirNumericComponents() {
+        SemverRange range = new SemverRange(">=1.21.0 <1.22.0");
+
+        assertTrue(range.includes(new CalendarVersion("1.21.8")));
+        assertFalse(range.includes(new CalendarVersion("1.22")));
+    }
+
     @Test
     void acceptsDocumentedNpmRangeForms() {
         List<String> ranges = List.of(
