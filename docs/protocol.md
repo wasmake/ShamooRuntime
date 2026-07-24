@@ -55,7 +55,9 @@ relative `.js`, `.mjs`, or `.cjs` paths.
 Filesystem policy paths are plugin-root relative. Forms such as `./`, `./data`, `./config`, and `./cache` are valid;
 absolute paths, drive paths, backslashes, NUL, empty segments, and parent traversal are invalid. Plugin and dependency
 IDs use lowercase ASCII letters, digits, dots, underscores, and hyphens, begin with a letter, and are limited to 64
-characters. Dependency maps must be disjoint, as must the two ordering lists. Lists reject duplicate entries.
+characters. The canonical Java schema and validator also limit a manifest to 1,048,576 UTF-8 bytes, non-blank text
+and SemVer expressions to 256 Unicode characters, relative paths to 512 characters, and each dependency map or policy
+list to 256 entries. Dependency maps must be disjoint, as must the two ordering lists. Lists reject duplicate entries.
 
 Versions use strict SemVer 2.0 syntax, including optional prerelease and build metadata; leading `v` and leading
 zeroes are rejected. Constraints use strictly validated NPM-compatible ranges interpreted by semver4j 6, including

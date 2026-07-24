@@ -33,6 +33,17 @@ audiences without serialization.
 Bootstraps publish only named platform operations into Javet. Every invocation requires generated namespace/type and
 protocol metadata, binds ownership to the calling plugin, and registers listeners, commands, tasks, channels, and packet
 subscriptions in `ResourceRegistry`; server, proxy, registrar, scheduler, and packet registry objects are never exposed.
+Script dispatchers are explicit registered callback names. Paper event callbacks are synchronously joined in the
+native event frame, scheduled work uses Paper/Folia schedulers, and Velocity event callbacks return the native
+continuation stage. Only copied scalar/list/map/byte carriers cross the isolate boundary. Paper proxy requests select
+an eligible online player automatically rather than exposing a `Player` carrier to JS.
+
+Generated invocation identities are cached on immutable strings and protocol values, never event classes, plugin
+instances, runtimes, or class loaders. Paper packet subscribers use a copy-on-write array prepared only when
+subscriptions change, so dispatch does not allocate a subscriber snapshot. Velocity reuses native
+`CompletableFuture` instances instead of wrapping every event completion while preserving generic `CompletionStage`
+support. Regression tests assert the common `CompletableFuture` event path returns the identical future, making the
+removed per-dispatch adapter allocation observable without relying on timing benchmarks.
 
 ## Velocity
 
@@ -66,3 +77,8 @@ bootstrap, wait for the runtime readiness probe, stop cleanly, and retain logs:
 ./gradlew paperProcessIntegration
 ./gradlew velocityProcessIntegration
 ```
+
+The CI process tasks launch each platform independently. A combined Paper-plus-Velocity transport process is not run:
+the pinned harness has no backend login client, so Bukkit plugin messaging cannot obtain the required live player
+carrier. Transport codec, endpoint trust, carrier invalidation, and request timeout behavior are covered in JVM tests;
+the missing authenticated player connection is the exact external process-fixture blocker.

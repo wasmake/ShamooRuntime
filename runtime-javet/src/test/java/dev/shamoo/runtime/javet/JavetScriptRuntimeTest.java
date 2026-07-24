@@ -76,7 +76,7 @@ class JavetScriptRuntimeTest {
 
     @Test
     void exposesOnlyMetadataCheckedPlatformCapabilities() throws RuntimeInitializationException {
-        PlatformCapabilities capabilities = new PlatformCapabilities(Map.of("registerEvent",
+        PlatformCapabilities capabilities = new PlatformCapabilities("paper", Map.of("registerEvent",
                 (owner, metadata, arguments) -> owner + ":" + metadata.typeName() + ":" + arguments.getFirst()));
         try (JavetScriptRuntime runtime = new JavetScriptRuntime(
                 host, new PluginId("fixture"), capabilities)) {
@@ -86,6 +86,10 @@ class JavetScriptRuntimeTest {
 
             assertEquals("fixture:JoinEvent:ok", accepted.value());
             assertEquals(ScriptResult.Status.FAILURE, rejected.status());
+            ScriptResult wrongNamespace = execute(runtime, "wrong-namespace",
+                    "host.registerEvent({namespace: 'velocity', typeName: 'JoinEvent', "
+                            + "protocolMajor: 1, protocolMinor: 0}, 'bad')").join();
+            assertEquals(ScriptResult.Status.FAILURE, wrongNamespace.status());
         }
     }
 

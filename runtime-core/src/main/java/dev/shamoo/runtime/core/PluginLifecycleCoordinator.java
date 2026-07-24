@@ -1,5 +1,7 @@
 package dev.shamoo.runtime.core;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
@@ -30,7 +32,10 @@ public final class PluginLifecycleCoordinator {
     private final QuarantinePolicy quarantinePolicy;
     private final Executor executor;
     private final PlatformCapabilities platformCapabilities;
+    private final CrossPluginServiceRegistry serviceRegistry = new CrossPluginServiceRegistry();
+    private final CrossPluginEventBus eventBus = new CrossPluginEventBus();
     private final Map<PluginId, ManagedPlugin> plugins = new ConcurrentHashMap<>();
+    private final Map<PluginId, List<ResourceRegistry>> retiredLeaks = new ConcurrentHashMap<>();
     private final Object lifecycleLock = new Object();
     private CompletableFuture<Void> lifecycleTail = completed();
     private volatile DependencyResolution resolution = new DependencyResolution(
@@ -79,14 +84,17 @@ public final class PluginLifecycleCoordinator {
             }
             for (Map.Entry<PluginId, InstalledPluginCandidate> entry : indexed.entrySet()) {
                 ManagedPlugin existing = plugins.get(entry.getKey());
-                if (existing != null && !existing.candidate.equals(entry.getValue())) {
+                if (existing != null && existing.machine.state() != PluginLifecycleState.UNLOADED
+                        && !existing.candidate.equals(entry.getValue())) {
                     throw new IllegalStateException("installed candidate cannot be replaced before transactional swap");
                 }
             }
             Map<PluginId, ManagedPlugin> replacement = new LinkedHashMap<>();
             indexed.forEach((id, candidate) -> {
                 ManagedPlugin existing = plugins.get(id);
-                replacement.put(id, existing == null ? new ManagedPlugin(candidate) : existing);
+                replacement.put(id, existing == null || (existing.machine.state() == PluginLifecycleState.UNLOADED
+                                && !existing.candidate.equals(candidate))
+                        ? new ManagedPlugin(candidate, resources) : existing);
             });
             replacement.values().forEach(plugin -> updateDependencyState(plugin, next));
             plugins.clear();
@@ -114,6 +122,24 @@ public final class PluginLifecycleCoordinator {
 
     public CompletionStage<Void> unload(PluginId pluginId, UUID correlationId) {
         return serialized(() -> doUnload(plugin(pluginId), correlationId));
+    }
+
+    /** Stages and transactionally replaces one installed plugin candidate. */
+    public CompletionStage<Void> stageAndReplace(
+            Path source, Path stagingRoot, PluginStager stager, UUID correlationId) {
+        Objects.requireNonNull(stager, "stager");
+        try {
+            return replace(stager.stage(source, stagingRoot), correlationId);
+        } catch (IOException | RuntimeException exception) {
+            return CompletableFuture.failedFuture(exception);
+        }
+    }
+
+    /** Prepares a candidate, drains the old generation, then atomically switches invocation admission. */
+    public CompletionStage<Void> replace(InstalledPluginCandidate candidate, UUID correlationId) {
+        Objects.requireNonNull(candidate, "candidate");
+        Objects.requireNonNull(correlationId, "correlationId");
+        return serialized(() -> doReplace(candidate, correlationId));
     }
 
     public CompletionStage<Void> enableAll(UUID correlationId) {
@@ -154,7 +180,7 @@ public final class PluginLifecycleCoordinator {
                 plugin.machine.history(),
                 resolution.dependencies().getOrDefault(pluginId, Set.of()),
                 resolution.blocked().getOrDefault(pluginId, List.of()),
-                resources.snapshot(pluginId),
+                resourceSnapshot(plugin),
                 plugin.invocations.snapshot(),
                 plugin.metrics(),
                 Instant.now());
@@ -175,7 +201,8 @@ public final class PluginLifecycleCoordinator {
         plugin.transition(PluginLifecycleState.LOADING, correlationId, "load requested");
         plugin.operations.incrementAndGet();
         PluginRuntimeContext context = new PluginRuntimeContext(
-                plugin.candidate, resources, plugin.invocations, platformCapabilities);
+                plugin.candidate, plugin.resources, plugin.invocations, platformCapabilities,
+                plugin.services, plugin.events, plugin.generationId);
         CompletionStage<PluginRuntime> creation;
         try {
             creation = plugin.runtime == null
@@ -199,6 +226,11 @@ public final class PluginLifecycleCoordinator {
     }
 
     private CompletionStage<Void> doEnable(ManagedPlugin plugin, UUID correlationId) {
+        return doEnable(plugin, correlationId, resolution);
+    }
+
+    private CompletionStage<Void> doEnable(
+            ManagedPlugin plugin, UUID correlationId, DependencyResolution dependencyResolution) {
         if (plugin.machine.state() == PluginLifecycleState.QUARANTINED) {
             return quarantined(plugin, correlationId);
         }
@@ -206,7 +238,7 @@ public final class PluginLifecycleCoordinator {
                 || plugin.machine.state() == PluginLifecycleState.READY) {
             return completed();
         }
-        for (PluginId dependency : resolution.dependencies().getOrDefault(
+        for (PluginId dependency : dependencyResolution.dependencies().getOrDefault(
                 plugin.candidate.pluginId(), Set.of())) {
             PluginLifecycleState dependencyState = plugin(dependency).machine.state();
             if (dependencyState != PluginLifecycleState.ENABLED
@@ -222,6 +254,10 @@ public final class PluginLifecycleCoordinator {
     }
 
     private CompletionStage<Void> doReady(ManagedPlugin plugin, UUID correlationId) {
+        return doReady(plugin, correlationId, true);
+    }
+
+    private CompletionStage<Void> doReady(ManagedPlugin plugin, UUID correlationId, boolean openInvocations) {
         if (plugin.machine.state() == PluginLifecycleState.QUARANTINED) {
             return quarantined(plugin, correlationId);
         }
@@ -231,7 +267,13 @@ public final class PluginLifecycleCoordinator {
         plugin.transition(PluginLifecycleState.READYING, correlationId, "ready requested");
         return hook(plugin.runtime::ready, plugin, PluginLifecycleState.READYING,
                 PluginLifecycleState.READY, PluginLifecycleState.READY_FAILED, correlationId)
-                .thenRun(plugin.invocations::open);
+                .thenRun(() -> {
+                    if (openInvocations) {
+                        plugin.invocations.open();
+                        serviceRegistry.activate(plugin.generationId);
+                        eventBus.activate(plugin.generationId);
+                    }
+                });
     }
 
     private CompletionStage<Void> doDisable(ManagedPlugin plugin, UUID correlationId) {
@@ -243,6 +285,8 @@ public final class PluginLifecycleCoordinator {
         }
         plugin.transition(PluginLifecycleState.DRAINING, correlationId, "disable drain requested");
         plugin.invocations.stop();
+        serviceRegistry.deactivate(plugin.generationId);
+        eventBus.deactivate(plugin.generationId);
         return hookOnly(plugin.runtime::drain, plugin, PluginLifecycleState.DRAINING, correlationId)
                 .thenCompose(ignored -> timed(plugin.invocations.awaitDrained(drainTimeout), plugin,
                         PluginLifecycleState.DRAINING, correlationId, drainTimeout).thenApply(value -> (Void) null))
@@ -288,15 +332,20 @@ public final class PluginLifecycleCoordinator {
                 ? completed() : hookOnly(plugin.runtime::unload, plugin,
                         PluginLifecycleState.UNLOADING, correlationId)).thenCompose(ignored -> {
             plugin.unloadHookComplete = true;
-            ResourceCleanupReport report = resources.cleanup(plugin.candidate.pluginId());
-            if (!report.clean()) {
+            ResourceCleanupReport report = plugin.resources.cleanup(plugin.candidate.pluginId());
+            List<Exception> retiredErrors = retryRetiredResources(plugin.candidate.pluginId());
+            serviceRegistry.retire(plugin.generationId);
+            eventBus.deactivate(plugin.generationId);
+            if (!report.clean() || !retiredErrors.isEmpty()) {
                 plugin.failedHooks.incrementAndGet();
                 plugin.transition(PluginLifecycleState.UNLOAD_FAILED, correlationId, "resource cleanup failed");
                 if (quarantinePolicy.quarantineResourceLeaks()) {
                     quarantine(plugin, correlationId, "resource cleanup leaked or failed");
                 }
                 return CompletableFuture.failedFuture(new ResourceCleanupError(
-                        plugin.candidate.pluginId(), correlationId, aggregate(report.errors())));
+                        plugin.candidate.pluginId(), correlationId,
+                        aggregate(java.util.stream.Stream.concat(report.errors().stream(), retiredErrors.stream())
+                                .toList())));
             }
             plugin.runtime = null;
             plugin.successfulHooks.incrementAndGet();
@@ -400,10 +449,193 @@ public final class PluginLifecycleCoordinator {
     private void cleanupLateRuntime(ManagedPlugin plugin, PluginRuntime runtime) {
         try {
             CompletionStage<Void> cleanup = Objects.requireNonNull(runtime.unload(), "unload hook result");
-            cleanup.whenComplete((ignored, failure) -> resources.cleanup(plugin.candidate.pluginId()));
+            cleanup.whenComplete((ignored, failure) -> plugin.resources.cleanup(plugin.candidate.pluginId()));
         } catch (RuntimeException exception) {
-            resources.cleanup(plugin.candidate.pluginId());
+            plugin.resources.cleanup(plugin.candidate.pluginId());
         }
+    }
+
+    private CompletionStage<Void> doReplace(InstalledPluginCandidate candidate, UUID correlationId) {
+        ManagedPlugin active = plugin(candidate.pluginId());
+        if (active.machine.state() != PluginLifecycleState.READY) {
+            return CompletableFuture.failedFuture(new IllegalStateException(
+                    "plugin must be ready before replacement: " + candidate.pluginId()));
+        }
+        if (active.candidate.equals(candidate)) {
+            return completed();
+        }
+        DependencyResolution next;
+        try {
+            next = replacementResolution(candidate);
+            validateReplacement(next, candidate.pluginId());
+        } catch (RuntimeException exception) {
+            return CompletableFuture.failedFuture(exception);
+        }
+        ManagedPlugin staged = new ManagedPlugin(candidate, new ResourceRegistry());
+        java.util.concurrent.atomic.AtomicBoolean swapped = new java.util.concurrent.atomic.AtomicBoolean();
+        Set<PluginId> reloadDependents = serviceRegistry.reloadDependents(candidate.pluginId());
+        return doLoad(staged, correlationId)
+                .thenCompose(ignored -> doEnable(staged, correlationId, next))
+                .thenCompose(ignored -> doReady(staged, correlationId, false))
+                .thenCompose(ignored -> migrateState(active, staged, correlationId))
+                .thenCompose(ignored -> disableReloadDependents(reloadDependents, correlationId))
+                .thenCompose(ignored -> doDisable(active, correlationId))
+                .thenRun(() -> {
+                    synchronized (lifecycleLock) {
+                        staged.invocations.open();
+                        serviceRegistry.activate(staged.generationId);
+                        eventBus.activate(staged.generationId);
+                        resolution = next;
+                        plugins.put(candidate.pluginId(), staged);
+                        swapped.set(true);
+                    }
+                })
+                .thenCompose(ignored -> cleanupAfterSwap(active, reloadDependents, correlationId))
+                .whenComplete((ignored, failure) -> {
+                    if (swapped.get() && failure != null) {
+                        if (!active.resources.snapshot(candidate.pluginId()).isEmpty()) {
+                            retiredLeaks.computeIfAbsent(candidate.pluginId(), pluginId ->
+                                    new java.util.concurrent.CopyOnWriteArrayList<>()).add(active.resources);
+                        }
+                    }
+                })
+                .exceptionallyCompose(failure -> swapped.get()
+                        ? CompletableFuture.failedFuture(unwrap(failure))
+                        : enableReloadDependents(reloadDependents, correlationId)
+                                .handle((ignored, recoveryFailure) -> {
+                                    Throwable original = unwrap(failure);
+                                    if (recoveryFailure != null) {
+                                        original.addSuppressed(unwrap(recoveryFailure));
+                                    }
+                                    return original;
+                                }).thenCompose(original -> discardCandidate(staged, correlationId, original)));
+    }
+
+    private CompletionStage<Void> cleanupAfterSwap(
+            ManagedPlugin retired, Set<PluginId> reloadDependents, UUID correlationId) {
+        return enableReloadDependents(reloadDependents, correlationId)
+                .handle((ignored, dependentFailure) -> dependentFailure)
+                .thenCompose(dependentFailure -> doUnload(retired, correlationId)
+                        .handle((ignored, cleanupFailure) -> {
+                            if (dependentFailure == null && cleanupFailure == null) {
+                                return null;
+                            }
+                            Throwable failure = dependentFailure == null
+                                    ? unwrap(cleanupFailure) : unwrap(dependentFailure);
+                            if (cleanupFailure != null && dependentFailure != null) {
+                                failure.addSuppressed(unwrap(cleanupFailure));
+                            }
+                            throw new CompletionException(failure);
+                        }));
+    }
+
+    private DependencyResolution replacementResolution(InstalledPluginCandidate candidate) {
+        List<InstalledPluginCandidate> candidates = plugins.values().stream()
+                .map(plugin -> plugin.candidate.pluginId().equals(candidate.pluginId())
+                        ? candidate : plugin.candidate)
+                .toList();
+        return new PluginDependencyGraph().resolve(candidates);
+    }
+
+    private void validateReplacement(DependencyResolution next, PluginId replacementId) {
+        if (next.blocked().containsKey(replacementId)) {
+            throw new IllegalArgumentException("replacement candidate is dependency-blocked: "
+                    + next.blocked().get(replacementId));
+        }
+        for (Map.Entry<PluginId, ManagedPlugin> entry : plugins.entrySet()) {
+            if (isActive(entry.getValue().machine.state()) && next.blocked().containsKey(entry.getKey())) {
+                throw new IllegalArgumentException("replacement would block active dependent " + entry.getKey());
+            }
+        }
+    }
+
+    private CompletionStage<Void> migrateState(
+            ManagedPlugin active, ManagedPlugin staged, UUID correlationId) {
+        if (!staged.candidate.descriptor().reload().preserveState()
+                || !(active.runtime instanceof HotStatePluginRuntime source)
+                || !(staged.runtime instanceof HotStatePluginRuntime target)) {
+            return completed();
+        }
+        active.operations.incrementAndGet();
+        staged.operations.incrementAndGet();
+        return timed(source.exportHotState(), active, PluginLifecycleState.READY, correlationId)
+                .thenCompose(state -> {
+                    byte[] snapshot = Objects.requireNonNull(state, "exported hot state").clone();
+                    return timed(target.importHotState(snapshot), staged,
+                            PluginLifecycleState.READY, correlationId);
+                });
+    }
+
+    private CompletionStage<Void> disableReloadDependents(Set<PluginId> dependents, UUID correlationId) {
+        CompletionStage<Void> sequence = completed();
+        for (PluginId id : resolution.disableOrder()) {
+            if (dependents.contains(id) && isActive(plugin(id).machine.state())) {
+                sequence = sequence.thenCompose(ignored -> doDisable(plugin(id), correlationId));
+            }
+        }
+        return sequence;
+    }
+
+    private CompletionStage<Void> enableReloadDependents(Set<PluginId> dependents, UUID correlationId) {
+        CompletionStage<Void> sequence = completed();
+        for (PluginId id : resolution.enableOrder()) {
+            if (dependents.contains(id)) {
+                ManagedPlugin dependent = plugin(id);
+                sequence = sequence.thenCompose(ignored -> doEnable(dependent, correlationId))
+                        .thenCompose(ignored -> doReady(dependent, correlationId));
+            }
+        }
+        return sequence;
+    }
+
+    private CompletionStage<Void> discardCandidate(
+            ManagedPlugin staged, UUID correlationId, Throwable original) {
+        staged.invocations.stop();
+        CompletionStage<Void> unload;
+        try {
+            unload = staged.runtime == null ? completed()
+                    : timed(Objects.requireNonNull(staged.runtime.unload(), "unload hook result"),
+                            staged, PluginLifecycleState.UNLOADING, correlationId);
+        } catch (RuntimeException exception) {
+            unload = CompletableFuture.failedFuture(exception);
+        }
+        return unload.handle((ignored, cleanupFailure) -> {
+            ResourceCleanupReport report = staged.resources.cleanup(staged.candidate.pluginId());
+            serviceRegistry.retire(staged.generationId);
+            eventBus.deactivate(staged.generationId);
+            if (cleanupFailure != null) {
+                original.addSuppressed(unwrap(cleanupFailure));
+            }
+            if (!report.clean()) {
+                original.addSuppressed(aggregate(report.errors()));
+            }
+            throw new CompletionException(original);
+        });
+    }
+
+    private List<ResourceRegistration> resourceSnapshot(ManagedPlugin plugin) {
+        List<ResourceRegistration> snapshot = new java.util.ArrayList<>(
+                plugin.resources.snapshot(plugin.candidate.pluginId()));
+        retiredLeaks.getOrDefault(plugin.candidate.pluginId(), List.of()).forEach(registry ->
+                snapshot.addAll(registry.snapshot(plugin.candidate.pluginId())));
+        return List.copyOf(snapshot);
+    }
+
+    private List<Exception> retryRetiredResources(PluginId pluginId) {
+        List<ResourceRegistry> registries = retiredLeaks.getOrDefault(pluginId, List.of());
+        List<Exception> errors = new java.util.ArrayList<>();
+        if (registries.isEmpty()) {
+            return List.of();
+        }
+        registries.removeIf(registry -> {
+            ResourceCleanupReport report = registry.cleanup(pluginId);
+            errors.addAll(report.errors());
+            return report.clean();
+        });
+        if (registries.isEmpty()) {
+            retiredLeaks.remove(pluginId, registries);
+        }
+        return List.copyOf(errors);
     }
 
     private CompletionStage<Void> fail(
@@ -529,6 +761,10 @@ public final class PluginLifecycleCoordinator {
         private final InstalledPluginCandidate candidate;
         private final PluginLifecycleMachine machine;
         private final InvocationAdmission invocations;
+        private final ResourceRegistry resources;
+        private final UUID generationId = UUID.randomUUID();
+        private final PluginServices services;
+        private final PluginEvents events;
         private volatile PluginRuntime runtime;
         private volatile boolean unloadHookComplete;
         private final AtomicInteger failures = new AtomicInteger();
@@ -539,10 +775,13 @@ public final class PluginLifecycleCoordinator {
         private final AtomicLong quarantines = new AtomicLong();
         private final AtomicLong fence = new AtomicLong();
 
-        private ManagedPlugin(InstalledPluginCandidate candidate) {
+        private ManagedPlugin(InstalledPluginCandidate candidate, ResourceRegistry resources) {
             this.candidate = candidate;
+            this.resources = resources;
             machine = new PluginLifecycleMachine(candidate.pluginId());
             invocations = new InvocationAdmission(candidate.pluginId());
+            services = serviceRegistry.scoped(generationId, candidate.pluginId(), invocations, resources);
+            events = eventBus.scoped(generationId, candidate.pluginId(), invocations, resources);
         }
 
         private void transition(PluginLifecycleState state, UUID correlationId, String reason) {

@@ -1,3 +1,10 @@
+plugins:
+  directory: plugins
+  stability-millis: 200
+  watch-debounce-millis: 500
+  hook-timeout-millis: 5000
+  drain-timeout-millis: 5000
+
 packets:
   enabled: false
   process-smoke: false

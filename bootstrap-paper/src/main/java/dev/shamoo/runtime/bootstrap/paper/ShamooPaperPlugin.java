@@ -1,12 +1,16 @@
 package dev.shamoo.runtime.bootstrap.paper;
 
-import dev.shamoo.runtime.core.RuntimeInitializationException;
 import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.core.ResourceRegistry;
 import dev.shamoo.runtime.core.PlatformCapabilities;
-import dev.shamoo.runtime.core.ScriptRuntime;
-import dev.shamoo.runtime.javet.JavetScriptRuntime;
-import dev.shamoo.runtime.platform.paper.PaperRuntimeHost;
+import dev.shamoo.runtime.core.OptionalProxyTransport;
+import dev.shamoo.runtime.core.ScriptCallback;
+import dev.shamoo.runtime.javet.JavetPluginHost;
+import dev.shamoo.runtime.protocol.CompatibilityInput;
+import dev.shamoo.runtime.protocol.PlatformKind;
+import dev.shamoo.runtime.protocol.ProtocolVersion;
+import dev.shamoo.runtime.protocol.RuntimeCapability;
+import dev.shamoo.runtime.protocol.SemanticVersion;
 import dev.shamoo.runtime.platform.paper.GeneratedPaperEventRegistry;
 import dev.shamoo.runtime.platform.paper.PaperEventBridge;
 import dev.shamoo.runtime.platform.paper.PaperCommandBridge;
@@ -21,6 +25,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Set;
 import java.util.Map;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
@@ -29,7 +34,8 @@ import org.bukkit.event.EventPriority;
 
 /** Paper entry point that owns the native runtime lifecycle. */
 public final class ShamooPaperPlugin extends JavaPlugin {
-    private ScriptRuntime runtime;
+    private static final PluginId RUNTIME_OWNER = new PluginId("shamooruntime");
+    private JavetPluginHost pluginHost;
     private final ResourceRegistry packetResources = new ResourceRegistry();
     private final ResourceRegistry platformResources = new ResourceRegistry();
     private GeneratedPaperEventRegistry eventRegistry;
@@ -37,6 +43,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     private PaperCommandBridge commandBridge;
     private PaperSchedulerBridge schedulerBridge;
     private PaperMessagingBridge messagingBridge;
+    private OptionalProxyTransport proxyTransport;
     private PacketDispatcherHub packetDispatcher;
     private PaperNmsInjectionManager packetManager;
 
@@ -48,15 +55,22 @@ public final class ShamooPaperPlugin extends JavaPlugin {
             commandBridge = new PaperCommandBridge(this, platformResources);
             schedulerBridge = new PaperSchedulerBridge(this, platformResources);
             messagingBridge = new PaperMessagingBridge(this, platformResources);
+            proxyTransport = platformResources.register(new OptionalProxyTransport(Duration.ofSeconds(3)));
+            messagingBridge.registerProxyTransport(RUNTIME_OWNER, proxyTransport);
             enablePackets();
             enablePacketProcessProbe();
-            PluginId owner = new PluginId("shamooruntime");
-            runtime = new JavetScriptRuntime(new PaperRuntimeHost(this), owner, platformCapabilities());
+            pluginHost = new JavetPluginHost(pluginDirectory(), compatibility(), platformCapabilities(),
+                    Duration.ofMillis(getConfig().getLong("plugins.stability-millis", 200)),
+                    Duration.ofMillis(getConfig().getLong("plugins.hook-timeout-millis", 5000)),
+                    Duration.ofMillis(getConfig().getLong("plugins.drain-timeout-millis", 5000)),
+                    context -> Map.of(), System.getLogger(getClass().getName()));
+            pluginHost.start(Duration.ofMillis(getConfig().getLong("plugins.watch-debounce-millis", 500)));
             if (getLogger().isLoggable(Level.INFO)) {
-                getLogger().info("ShamooRuntime initialized with protocol " + runtime.protocolVersion()
+                getLogger().info("ShamooRuntime initialized with protocol " + ProtocolVersion.CURRENT
+                        + " and " + pluginHost.runtimeCount() + " isolated plugins"
                         + " and " + eventRegistry.size() + " generated Paper events");
             }
-        } catch (RuntimeInitializationException | IOException | IllegalStateException exception) {
+        } catch (IOException | IllegalStateException exception) {
             if (getLogger().isLoggable(Level.SEVERE)) {
                 getLogger().severe("Unable to initialize the V8 runtime: " + exception.getMessage());
             }
@@ -64,31 +78,68 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         }
     }
 
+    private java.nio.file.Path pluginDirectory() {
+        String configured = getConfig().getString("plugins.directory", "plugins");
+        java.nio.file.Path path = java.nio.file.Path.of(configured);
+        return path.isAbsolute() ? path : getDataFolder().toPath().resolve(path);
+    }
+
+    private CompatibilityInput compatibility() {
+        SemanticVersion minecraft = new SemanticVersion(org.bukkit.Bukkit.getMinecraftVersion());
+        String api = org.bukkit.Bukkit.getBukkitVersion().split("-", 2)[0];
+        return new CompatibilityInput(PlatformKind.PAPER, minecraft, new SemanticVersion(api), null,
+                Set.of(RuntimeCapability.NODE_BUILTINS, RuntimeCapability.FILESYSTEM_READ,
+                        RuntimeCapability.FILESYSTEM_WRITE), runtimeVersion(), runtimeVersion(),
+                ProtocolVersion.CURRENT);
+    }
+
+    private SemanticVersion runtimeVersion() {
+        String version = getPluginMeta().getVersion();
+        return new SemanticVersion(version.endsWith("-SNAPSHOT")
+                ? version.substring(0, version.length() - "-SNAPSHOT".length()) : version);
+    }
+
     private PlatformCapabilities platformCapabilities() {
-        return new PlatformCapabilities(Map.of(
+        return new PlatformCapabilities("paper", Map.of(
                 "paperSubscribeEvent", (owner, metadata, arguments) -> {
-                    eventBridge.subscribe(owner, eventRegistry, string(arguments, 0),
+                    return eventBridge.subscribe(owner, eventRegistry, string(arguments, 0),
                             EventPriority.valueOf(string(arguments, 1)), bool(arguments, 2),
-                            typed(arguments, 3, PaperEventBridge.SynchronousEventDispatcher.class));
-                    return true;
+                            event -> typed(arguments, 3, ScriptCallback.class).invoke(List.of(Map.of(
+                                    "type", event.getEventName(), "asynchronous", event.isAsynchronous())))
+                                    .toCompletableFuture().join());
                 },
                 "paperRegisterCommand", (owner, metadata, arguments) -> {
-                    commandBridge.register(owner, string(arguments, 0), strings(arguments, 1),
-                            typed(arguments, 2, PaperCommandBridge.CommandDispatcher.class));
-                    return true;
+                    return commandBridge.register(owner, string(arguments, 0), strings(arguments, 1),
+                            (sender, alias, values) -> Boolean.TRUE.equals(typed(arguments, 2, ScriptCallback.class)
+                                    .invoke(List.of(Map.of("sender", sender.getName(), "alias", alias,
+                                            "arguments", values))).toCompletableFuture().join()));
                 },
                 "paperScheduleGlobal", (owner, metadata, arguments) -> {
-                    schedulerBridge.runGlobal(owner, typed(arguments, 0, Runnable.class));
-                    return true;
+                    ScriptCallback callback = typed(arguments, 0, ScriptCallback.class);
+                    return schedulerBridge.runGlobal(owner, () -> callback.invoke(List.of()));
                 },
                 "paperRegisterMessaging", (owner, metadata, arguments) -> {
-                    messagingBridge.register(owner, string(arguments, 0),
-                            typed(arguments, 1, org.bukkit.plugin.messaging.PluginMessageListener.class));
-                    return true;
+                    return messagingBridge.register(owner, string(arguments, 0),
+                            (channel, player, payload) -> typed(arguments, 1, ScriptCallback.class).invoke(List.of(
+                                    Map.of("channel", channel, "playerId", player.getUniqueId().toString(),
+                                            "payload", payload.clone()))));
                 },
+                "paperProxyCarrier", (owner, metadata, arguments) -> messagingBridge.selectCarrier(proxyTransport),
+                "paperProxyRequest", (owner, metadata, arguments) -> proxyTransport.request(
+                        typed(arguments, 0, byte[].class)),
                 "paperSubscribePacket", (owner, metadata, arguments) -> {
-                    subscribePackets(owner, typed(arguments, 0, PaperPacketBridge.PacketDispatcher.class));
-                    return true;
+                    ScriptCallback callback = typed(arguments, 0, ScriptCallback.class);
+                    return subscribePackets(owner, packet -> callback.invoke(List.of(Map.of(
+                            "direction", packet.direction().name(), "phase", packet.phase().name(),
+                            "protocolDirection", packet.protocolDirection().name(),
+                            "protocolId", packet.protocolId(),
+                            "packetType", packet.packet().descriptor().id()))).thenApply(value -> {
+                                if (!(value instanceof Map<?, ?> decision)) {
+                                    throw new IllegalArgumentException("packet callback must return a decision object");
+                                }
+                                return Boolean.TRUE.equals(decision.get("cancelled"))
+                                        ? PaperPacketBridge.Decision.cancel() : PaperPacketBridge.Decision.pass();
+                            }));
                 }));
     }
 
@@ -118,6 +169,13 @@ public final class ShamooPaperPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (pluginHost != null) {
+            try {
+                pluginHost.close();
+            } catch (RuntimeException exception) {
+                getLogger().log(Level.WARNING, "Unable to close all script plugin runtimes", exception);
+            }
+        }
         if (packetManager != null) {
             packetManager.close();
         }
@@ -127,9 +185,6 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         } catch (Exception exception) {
             getLogger().log(Level.WARNING, "Unable to close all platform resources", exception);
         }
-        if (runtime != null) {
-            runtime.close();
-        }
     }
 
     private void enablePackets() throws IOException {
@@ -137,17 +192,16 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         if (!getConfig().getBoolean("packets.enabled", false)) {
             return;
         }
-        PluginId owner = new PluginId("shamooruntime");
         Set<PluginId> allowed = getConfig().getStringList("packets.allowed-plugins").stream()
                 .map(PluginId::new).collect(java.util.stream.Collectors.toUnmodifiableSet());
         Set<PluginId> infrastructure = new java.util.HashSet<>(allowed);
-        infrastructure.add(owner);
+        infrastructure.add(RUNTIME_OWNER);
         PaperPacketBridge bridge = new PaperPacketBridge(new PacketAccessPolicy(true, infrastructure),
                 GeneratedPacketRegistry.load(getClassLoader()), packetResources,
                 Duration.ofMillis(getConfig().getLong("packets.timeout-millis", 50)),
                 getConfig().getInt("packets.maximum-pending", 256));
         packetDispatcher = new PacketDispatcherHub(new PacketAccessPolicy(true, allowed), packetResources);
-        packetManager = new PaperNmsInjectionManager(this, owner, bridge, packetDispatcher);
+        packetManager = new PaperNmsInjectionManager(this, RUNTIME_OWNER, bridge, packetDispatcher);
         packetManager.start();
     }
 
@@ -155,9 +209,8 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         if (!getConfig().getBoolean("packets.process-smoke", false)) {
             return;
         }
-        PluginId owner = new PluginId("shamooruntime");
         AtomicInteger intercepted = new AtomicInteger();
-        subscribePackets(owner, packet -> {
+        subscribePackets(RUNTIME_OWNER, packet -> {
             if (packet.direction() == PaperPacketBridge.Direction.OUTBOUND
                     && packet.phase() == dev.shamoo.runtime.platform.paper.packet.PacketRegistry.Phase.STATUS) {
                 int count = intercepted.incrementAndGet();
@@ -183,5 +236,12 @@ public final class ShamooPaperPlugin extends JavaPlugin {
             throw new IllegalStateException("Paper packet interception is disabled");
         }
         return packetDispatcher.subscribe(owner, dispatcher);
+    }
+
+    public JavetPluginHost runtimeHost() {
+        if (pluginHost == null) {
+            throw new IllegalStateException("Script plugin host is not initialized");
+        }
+        return pluginHost;
     }
 }

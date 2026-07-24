@@ -6,11 +6,12 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
-/** Owns exactly one isolated Node runtime for each admitted plugin identity. */
+/** Owns isolated Node runtimes by plugin generation so active and staged candidates may coexist. */
 @SuppressWarnings("PMD.CloseResource")
 public final class ShamooNodeRuntimeManager implements AutoCloseable {
-    private final Map<PluginId, ShamooNodeRuntime> runtimes = new LinkedHashMap<>();
+    private final Map<RuntimeKey, ShamooNodeRuntime> runtimes = new LinkedHashMap<>();
 
     public synchronized ShamooNodeRuntime create(
             PluginId pluginId,
@@ -19,27 +20,56 @@ public final class ShamooNodeRuntimeManager implements AutoCloseable {
             Map<String, HostFunction> hostBindings,
             ShamooNodeRuntimeOptions options,
             RuntimeErrorReporter errorReporter) {
-        Objects.requireNonNull(pluginId, "pluginId");
-        if (runtimes.containsKey(pluginId)) {
+        if (runtimes.keySet().stream().anyMatch(key -> key.pluginId().equals(pluginId))) {
             throw new IllegalStateException("runtime already exists for " + pluginId);
+        }
+        return create(pluginId, UUID.randomUUID(), pluginRoot, policy, hostBindings, options, errorReporter);
+    }
+
+    public synchronized ShamooNodeRuntime create(
+            PluginId pluginId,
+            UUID generationId,
+            Path pluginRoot,
+            NodePolicy policy,
+            Map<String, HostFunction> hostBindings,
+            ShamooNodeRuntimeOptions options,
+            RuntimeErrorReporter errorReporter) {
+        Objects.requireNonNull(pluginId, "pluginId");
+        RuntimeKey key = new RuntimeKey(pluginId, generationId);
+        if (runtimes.containsKey(key)) {
+            throw new IllegalStateException("runtime already exists for " + key);
         }
         ShamooNodeRuntime runtime = ShamooNodeRuntime.create(
             pluginId, pluginRoot, policy, hostBindings, options, errorReporter);
-        runtimes.put(pluginId, runtime);
+        runtimes.put(key, runtime);
         return runtime;
     }
 
     public synchronized ShamooNodeRuntime get(PluginId pluginId) {
-        return runtimes.get(pluginId);
+        return runtimes.entrySet().stream().filter(entry -> entry.getKey().pluginId().equals(pluginId))
+                .map(Map.Entry::getValue).findFirst().orElse(null);
+    }
+
+    public synchronized ShamooNodeRuntime get(PluginId pluginId, UUID generationId) {
+        return runtimes.get(new RuntimeKey(pluginId, generationId));
     }
 
     public synchronized void close(PluginId pluginId) {
-        ShamooNodeRuntime runtime = runtimes.get(pluginId);
+        RuntimeKey key = runtimes.keySet().stream().filter(candidate -> candidate.pluginId().equals(pluginId))
+                .findFirst().orElse(null);
+        if (key != null) {
+            close(key.pluginId(), key.generationId());
+        }
+    }
+
+    public synchronized void close(PluginId pluginId, UUID generationId) {
+        RuntimeKey key = new RuntimeKey(pluginId, generationId);
+        ShamooNodeRuntime runtime = runtimes.get(key);
         if (runtime != null) {
             try {
                 runtime.close();
             } finally {
-                runtimes.remove(pluginId, runtime);
+                runtimes.remove(key, runtime);
             }
         }
     }
@@ -65,6 +95,13 @@ public final class ShamooNodeRuntimeManager implements AutoCloseable {
         runtimes.clear();
         if (failure != null) {
             throw failure;
+        }
+    }
+
+    private record RuntimeKey(PluginId pluginId, UUID generationId) {
+        private RuntimeKey {
+            Objects.requireNonNull(pluginId, "pluginId");
+            Objects.requireNonNull(generationId, "generationId");
         }
     }
 }

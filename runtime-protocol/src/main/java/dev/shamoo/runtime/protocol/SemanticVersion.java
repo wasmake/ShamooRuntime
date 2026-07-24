@@ -13,7 +13,7 @@ public record SemanticVersion(@JsonValue String value) {
             + "(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$";
     private static final Pattern STRICT_SEMVER = Pattern.compile(PATTERN);
 
-    @JsonCreator
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
     public SemanticVersion {
         validate(value, "/version");
     }
@@ -26,6 +26,10 @@ public record SemanticVersion(@JsonValue String value) {
 
     Semver parsed() {
         return Semver.parse(value);
+    }
+
+    public int comparePrecedence(SemanticVersion other) {
+        return parsed().compareTo(other.parsed());
     }
 
     static void validate(String value, String path) {

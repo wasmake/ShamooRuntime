@@ -3,4 +3,9 @@
     <Match>
         <Class name="~.*Test"/>
     </Match>
+    <Match>
+        <Class name="~dev\.shamoo\.runtime\.bootstrap\.(paper|velocity)\.Shamoo.*Plugin"/>
+        <Method name="runtimeHost"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
 </FindBugsFilter>

@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   schedule:
     - cron: '23 3 * * *'
@@ -28,7 +29,7 @@ jobs:
           cache: gradle
       - uses: gradle/actions/wrapper-validation@v4
       - name: Verify
-        run: ./gradlew build :runtime-codegen-support:diffPlatformApis --no-daemon --stacktrace
+        run: ./gradlew build :runtime-codegen-support:diffPlatformApis :runtime-codegen-support:verifyPaperApiCoverage :runtime-codegen-support:verifyVelocityApiCoverage --no-daemon --stacktrace
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4

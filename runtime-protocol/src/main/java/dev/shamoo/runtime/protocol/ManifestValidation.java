@@ -8,6 +8,9 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 final class ManifestValidation {
+    static final int MAX_TEXT_LENGTH = 256;
+    static final int MAX_PATH_LENGTH = 512;
+    static final int MAX_COLLECTION_SIZE = 256;
     private static final Pattern PLUGIN_ID = Pattern.compile("[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*");
     private static final Pattern BUILTIN = Pattern.compile("(?:node:)?[a-z][a-z0-9_/-]*");
 
@@ -17,6 +20,9 @@ final class ManifestValidation {
     static String text(String value, String path) {
         if (value == null || value.isBlank()) {
             fail("invalid_value", path, "must not be blank");
+        }
+        if (value.codePointCount(0, value.length()) > MAX_TEXT_LENGTH) {
+            fail("invalid_value", path, "must be at most " + MAX_TEXT_LENGTH + " characters");
         }
         return value;
     }
@@ -31,6 +37,9 @@ final class ManifestValidation {
 
     static String relativePath(String value, String path) {
         text(value, path);
+        if (value.length() > MAX_PATH_LENGTH) {
+            fail("unsafe_path", path, "must be at most " + MAX_PATH_LENGTH + " characters");
+        }
         boolean windowsDrive = value.length() >= 2 && Character.isLetter(value.charAt(0)) && value.charAt(1) == ':';
         if (value.startsWith("/") || value.startsWith("\\") || value.contains("\\") || value.indexOf('\0') >= 0
                 || windowsDrive) {
@@ -64,6 +73,7 @@ final class ManifestValidation {
 
     static List<String> paths(List<String> values, String path) {
         List<String> copy = List.copyOf(Objects.requireNonNull(values, path));
+        collectionSize(copy.size(), path);
         for (int index = 0; index < copy.size(); index++) {
             relativePath(copy.get(index), path + "/" + index);
         }
@@ -73,6 +83,7 @@ final class ManifestValidation {
 
     static List<String> pluginIds(List<String> values, String path) {
         List<String> copy = List.copyOf(Objects.requireNonNull(values, path));
+        collectionSize(copy.size(), path);
         for (int index = 0; index < copy.size(); index++) {
             pluginId(copy.get(index), path + "/" + index);
         }
@@ -82,6 +93,7 @@ final class ManifestValidation {
 
     static List<String> builtins(List<String> values, String path) {
         List<String> copy = List.copyOf(Objects.requireNonNull(values, path));
+        collectionSize(copy.size(), path);
         for (int index = 0; index < copy.size(); index++) {
             String value = text(copy.get(index), path + "/" + index);
             if (!BUILTIN.matcher(value).matches() || value.contains("..")) {
@@ -94,6 +106,7 @@ final class ManifestValidation {
 
     static Map<String, SemverRange> dependencies(Map<String, SemverRange> values, String path) {
         Map<String, SemverRange> copy = Map.copyOf(Objects.requireNonNull(values, path));
+        collectionSize(copy.size(), path);
         copy.forEach((id, range) -> {
             pluginId(id, path + "/" + id);
             Objects.requireNonNull(range, path + "/" + id);
@@ -116,6 +129,12 @@ final class ManifestValidation {
     private static void unique(List<String> values, String path) {
         if (new HashSet<>(values).size() != values.size()) {
             fail("duplicate_entry", path, "must not contain duplicate entries");
+        }
+    }
+
+    private static void collectionSize(int size, String path) {
+        if (size > MAX_COLLECTION_SIZE) {
+            fail("too_many_entries", path, "must contain at most " + MAX_COLLECTION_SIZE + " entries");
         }
     }
 }

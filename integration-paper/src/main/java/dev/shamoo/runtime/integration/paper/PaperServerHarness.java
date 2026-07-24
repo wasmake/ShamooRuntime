@@ -37,7 +37,14 @@ public final class PaperServerHarness {
         Files.createDirectories(plugins);
         Path pluginData = plugins.resolve("ShamooRuntime");
         Files.createDirectories(pluginData);
-        Files.writeString(pluginData.resolve("config.yml"), "packets:\n  enabled: true\n"
+        Path scriptPlugins = pluginData.resolve("scripts");
+        Files.createDirectories(scriptPlugins);
+        createScriptPlugin(scriptPlugins, "fixture-one");
+        createScriptPlugin(scriptPlugins, "fixture-two");
+        Files.writeString(pluginData.resolve("config.yml"), "plugins:\n  directory: scripts\n"
+                + "  stability-millis: 0\n  watch-debounce-millis: 100\n"
+                + "  hook-timeout-millis: 5000\n  drain-timeout-millis: 5000\n"
+                + "packets:\n  enabled: true\n"
                 + "  process-smoke: true\n  allowed-plugins: [shamooruntime]\n"
                 + "  timeout-millis: 1000\n  maximum-pending: 32\n",
                 StandardCharsets.UTF_8);
@@ -52,7 +59,7 @@ public final class PaperServerHarness {
         Process process = new ProcessBuilder(javaExecutable(), "-Xms512m", "-Xmx1g", "-jar",
                 Path.of(arguments[0]).toAbsolutePath().toString(), "--nogui")
                 .directory(work.toFile()).redirectErrorStream(true).start();
-        CountDownLatch ready = new CountDownLatch(1);
+        CountDownLatch ready = new CountDownLatch(2);
         Path log = work.resolve("harness.log");
         Thread output = Thread.ofPlatform().start(() -> readOutput(process, log, ready));
         try {
@@ -73,6 +80,34 @@ public final class PaperServerHarness {
         if (process.exitValue() != 0) {
             throw new IllegalStateException("Paper exited with " + process.exitValue() + "; inspect " + log);
         }
+    }
+
+    private static void createScriptPlugin(Path plugins, String name) throws IOException {
+        Path root = plugins.resolve(name);
+        Files.createDirectories(root);
+        Files.writeString(root.resolve("index.mjs"), "export default Object.freeze({enable(){"
+                + "console.log('SHAMOO_FIXTURE_LIFECYCLE " + name + "')}});\n", StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("shamoo-plugin.json"), manifest(name), StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("shamoo.metadata.json"), metadata(name, "paper"), StandardCharsets.UTF_8);
+    }
+
+    private static String metadata(String name, String platform) {
+        return "{\"formatVersion\":2,\"compilerVersion\":\"process-fixture\",\"packageName\":\"@fixture/"
+                + name + "\",\"components\":[],\"modules\":[],\"entrypoints\":{\"" + platform
+                + "\":{\"source\":\"src/plugin.ts\",\"output\":\"index.mjs\"}}}";
+    }
+
+    private static String manifest(String name) {
+        String platforms = "\"paper\":{\"enabled\":true,\"entrypoint\":\"index.mjs\","
+                + "\"minecraft\":\"1.21.x\",\"paperApi\":\"1.21.x\"},"
+                + "\"velocity\":{\"enabled\":false}";
+        return "{\"name\":\"" + name + "\",\"displayName\":\"" + name + "\",\"version\":\"1.0.0\","
+                + "\"shamoo\":{\"api\":\"^0.1.0\",\"runtime\":\"^0.1.0\",\"manifest\":1},"
+                + "\"platforms\":{" + platforms + "},\"dependencies\":{\"required\":{},\"optional\":{},"
+                + "\"loadBefore\":[],\"loadAfter\":[]},\"node\":{\"builtins\":[],\"filesystem\":{"
+                + "\"read\":[],\"write\":[]},\"network\":false,\"workers\":false,\"childProcess\":false,"
+                + "\"nativeAddons\":false},\"reload\":{\"watch\":true,\"debounceMs\":100,"
+                + "\"preserveState\":true}}";
     }
 
     private static void verifyStatusPacketPath(int port, Path log) throws IOException, InterruptedException {
@@ -142,6 +177,7 @@ public final class PaperServerHarness {
     }
 
     private static void readOutput(Process process, Path log, CountDownLatch ready) {
+        java.util.Set<String> loaded = new java.util.HashSet<>();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(),
                 StandardCharsets.UTF_8)); var writer = Files.newBufferedWriter(log, StandardCharsets.UTF_8)) {
             String line = reader.readLine();
@@ -149,8 +185,10 @@ public final class PaperServerHarness {
                 writer.write(line);
                 writer.newLine();
                 writer.flush();
-                if (line.contains("ShamooRuntime initialized with protocol")) {
-                    ready.countDown();
+                for (String fixture : java.util.List.of("fixture-one", "fixture-two")) {
+                    if (line.contains("SHAMOO_FIXTURE_LIFECYCLE " + fixture) && loaded.add(fixture)) {
+                        ready.countDown();
+                    }
                 }
                 line = reader.readLine();
             }

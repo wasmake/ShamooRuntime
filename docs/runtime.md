@@ -2,7 +2,8 @@
 
 ## Ownership and submission
 
-`ShamooNodeRuntimeManager` creates at most one `ShamooNodeRuntime` for each `PluginId`. Every instance creates its
+`ShamooNodeRuntimeManager` keys each `ShamooNodeRuntime` by plugin identity and generation UUID. Active and staged
+generations can coexist during replacement, while duplicate creation of the same generation is rejected. Every instance creates its
 Javet `NodeRuntime` on a dedicated daemon platform thread. Creation, V8 access, event-loop pumping, module resolution,
 callbacks, resource release, and native close stay on that thread. The Javet object is never returned to callers.
 
@@ -33,10 +34,14 @@ Node CommonJS loading because that path bypasses operation-level policy checks.
 
 ## Bindings and errors
 
-Host functions are direct Javet callbacks registered under explicit names on the frozen `host` object. Callback
-arguments and return values pass through Javet's object converter, but no Java object proxy converter, class lookup,
-reflection bridge, or unrestricted JVM object is installed. Callback functions and callback contexts are tracked and
-removed on close.
+Host functions are direct Javet callbacks registered under explicit names on a frozen, null-prototype `host` object.
+The global property cannot be replaced. Before Javet conversion, both directions accept only scalar data, byte arrays,
+and acyclic string-keyed lists/maps. Java/Javet objects, classes, class loaders, reflection members, dynamic proxies,
+and arbitrary service objects are rejected. No Java object proxy converter, class lookup, or reflection bridge is
+installed. JS functions cross only through `host.registerCallback(name, function)`; subsequent generated operations
+refer to the callback by name or an explicit `{$callback: name}` marker. Java `CompletionStage` results become native
+Promises through an isolate completion queue, so no foreign thread accesses V8. Callback functions and contexts are
+tracked and removed on close.
 
 Evaluation failures preserve the Javet cause in `RuntimeEvaluationError`. Errors carry plugin identity, script stack,
 and a one-based `SourcePosition` when Javet provides one. `SourceMapRegistry` maps exact generated positions to
@@ -55,7 +60,7 @@ admission, permission, and module errors remain exceptional completions for call
 `node:*`; filesystem entries remain plugin-root-relative. The implemented boundaries are deliberately narrower than
 the manifest model:
 
-| Capability | Phase 5 behavior |
+| Capability | Runtime behavior |
 | --- | --- |
 | `node:assert`, `node:buffer`, `node:path`, `node:querystring`, `node:string_decoder`, `node:url`, `node:util` | Available only when allow-listed, through controlled CommonJS/ESM resolution |
 | Filesystem | Native `node:fs` denied; `readTextFile()` and `writeTextFile()` enforce relative allowlists with descriptor-relative, no-follow traversal when `SecureDirectoryStream` is available, and deny access otherwise |
@@ -77,7 +82,7 @@ guarded invocation, and shuts down the executor. On the owner thread it marks No
 direct callbacks, callback contexts, Java bindings, registered resources, and resolver-created V8 modules, pumps
 pending work without waiting, and force-closes the Node runtime. Cleanup continues after individual failures, which
 are aggregated, and native close is always attempted. Concurrent callers wait on one shared close completion; the
-manager retains the plugin identity until it completes. Creation interruption or timeout similarly waits until the
+manager retains the exact generation key until it completes. Creation interruption or timeout similarly waits until the
 owner has closed any native runtime before throwing. JavaScript execution is bounded by `V8Guard`; close waits for the
 invocation and close timeouts and preserves interruption. Javet cannot preempt Java code inside a direct host callback, so trusted callback
 implementations must not block indefinitely. A native crash or a Javet/V8 defect cannot be made recoverable by Java

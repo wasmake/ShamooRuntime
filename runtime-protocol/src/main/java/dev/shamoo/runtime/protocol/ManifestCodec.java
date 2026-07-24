@@ -13,6 +13,7 @@ import java.util.Objects;
 
 /** Strict parser and deterministic serializer for canonical manifest JSON. */
 public final class ManifestCodec {
+    public static final int MAX_MANIFEST_BYTES = 1_048_576;
     private static final String DEPENDENCIES = "dependencies";
     private static final String ENABLED = "enabled";
     private static final String ENTRYPOINT = "entrypoint";
@@ -26,6 +27,10 @@ public final class ManifestCodec {
 
     public PluginDescriptor parse(String json) {
         Objects.requireNonNull(json, "json");
+        if (json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_MANIFEST_BYTES) {
+            throw new ManifestParseException(new ProtocolDiagnostic("manifest_too_large", "",
+                    "manifest exceeds " + MAX_MANIFEST_BYTES + " UTF-8 bytes"), null);
+        }
         try {
             JsonNode root = MAPPER.readTree(json);
             verifyRequiredFields(root);
@@ -137,9 +142,10 @@ public final class ManifestCodec {
         }
     }
 
+    @SuppressWarnings("deprecation")
     private static void validateDependencyRanges(JsonNode node, String path) {
         if (node.isObject()) {
-            node.properties().forEach(entry -> validateRange(
+            node.fields().forEachRemaining(entry -> validateRange(
                     entry.getValue(), path + "/" + escapePointerToken(entry.getKey())));
         }
     }

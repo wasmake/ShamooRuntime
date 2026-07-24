@@ -24,7 +24,7 @@ public record SemverRange(@JsonValue String value) {
     private static final Pattern NPM_RANGE = Pattern.compile(
             "^[ \\t]*" + SET + "(?:[ \\t]*\\|\\|[ \\t]*" + SET + ")*[ \\t]*$");
 
-    @JsonCreator
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
     public SemverRange {
         validate(value, "/range");
     }

@@ -103,6 +103,8 @@ public final class ShamooNodeRuntime implements AutoCloseable {
     private final Map<Long, RuntimeUnhandledError> pendingPromiseRejections = new HashMap<>();
     private final Deque<String> commonJsReferrers = new ArrayDeque<>();
     private final List<JavetCallbackContext> callbackContexts = new ArrayList<>();
+    private final java.util.Queue<Runnable> isolateCompletions =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
     private final CompletableFuture<Void> closeCompletion = new CompletableFuture<>();
     private volatile Thread ownerThread;
     private RuntimeCreationError creationAbort;
@@ -259,6 +261,23 @@ public final class ShamooNodeRuntime implements AutoCloseable {
         return submit(() -> executeRegisteredModule(canonicalName));
     }
 
+    /** Invokes only a callback explicitly registered by JS through {@code host.registerCallback()}. */
+    @SuppressWarnings("try")
+    public CompletableFuture<Object> invokeCallback(String name, List<Object> arguments) {
+        Objects.requireNonNull(name, "name");
+        List<Object> copied = List.copyOf(arguments);
+        return submit(() -> {
+            assertOwnerThread();
+            V8ValueFunction function = javaProxyRegistry.callback(name);
+            try (V8Guard guard = invocationGuard();
+                    V8Value result = function.callExtended(nodeRuntime.getGlobalObject(), true, copied.toArray())) {
+                return awaitAndConvert(result);
+            } catch (JavetException exception) {
+                throw translateEvaluation(exception, "callback:" + name);
+            }
+        });
+    }
+
     public CompletableFuture<String> readTextFile(String relativePath) {
         return submit(() -> readSecureFile(
             policyRelativePath(relativePath, permissions.readablePaths(), "read"), relativePath));
@@ -400,11 +419,13 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             awaitedRejectionHandler = nodeRuntime.getExecutor("(error) => undefined").execute();
             resources.register(awaitedRejectionHandler);
             installUncaughtExceptionReporter();
-            javaProxyRegistry = resources.register(new JavaProxyRegistry(nodeRuntime));
+            javaProxyRegistry = resources.register(new JavaProxyRegistry(nodeRuntime, isolateCompletions::add));
             for (Map.Entry<String, HostFunction> binding : Map.copyOf(hostBindings).entrySet()) {
                 javaProxyRegistry.register(binding.getKey(), binding.getValue());
             }
-            nodeRuntime.getExecutor("Object.freeze(host);").executeVoid();
+            nodeRuntime.getExecutor("Object.setPrototypeOf(host, null); Object.freeze(host);"
+                    + "Object.defineProperty(globalThis, 'host', {value: host, writable: false, configurable: false});")
+                    .executeVoid();
             removeUnsafeGlobals();
         }
     }
@@ -424,7 +445,9 @@ public final class ShamooNodeRuntime implements AutoCloseable {
     private void removeUnsafeGlobals() throws JavetException {
         String[] names = {
             "require", "process", "module", "exports", "__filename", "__dirname", "fetch", "WebSocket", "EventSource",
-            "BroadcastChannel", "MessageChannel", "MessageEvent", "MessagePort"
+            "BroadcastChannel", "MessageChannel", "MessageEvent", "MessagePort", "Worker", "SharedWorker",
+            "Java", "Packages", "Polyglot", "load", "loadWithNewGlobal", "quit", "gc",
+            "java", "javax", "com", "org", "edu"
         };
         for (String name : names) {
             nodeRuntime.getGlobalObject().delete(name);
@@ -471,7 +494,8 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             nodeRuntime.throwError(error.getMessage());
             return nodeRuntime.createV8ValueUndefined();
         }
-        if (ALWAYS_DENIED_BUILTINS.contains(canonical) || !SAFE_BUILTINS.contains(canonical)) {
+        String family = builtinFamily(canonical);
+        if (ALWAYS_DENIED_BUILTINS.contains(family) || !SAFE_BUILTINS.contains(family)) {
             RuntimePermissionError error = new RuntimePermissionError(
                 pluginId,
                 "module",
@@ -625,14 +649,24 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             // The native Node rejection tracker requires a real JavaScript rejection handler.
         }
         while (promise.isPending()) {
+            drainIsolateCompletions();
             nodeRuntime.await(V8AwaitMode.RunOnce);
         }
+        drainIsolateCompletions();
         try (V8Value promiseResult = promise.getResult()) {
             if (promise.isRejected()) {
                 throw new RuntimeEvaluationError(
                     pluginId, "promise rejected: " + errorText(promiseResult), null, valueStack(promiseResult), null);
             }
             return nodeRuntime.toObject(promiseResult);
+        }
+    }
+
+    private void drainIsolateCompletions() {
+        Runnable completion = isolateCompletions.poll();
+        while (completion != null) {
+            completion.run();
+            completion = isolateCompletions.poll();
         }
     }
 
@@ -676,7 +710,7 @@ public final class ShamooNodeRuntime implements AutoCloseable {
         if (exception instanceof BaseJavetScriptingException scriptingException) {
             JavetScriptingError scriptingError = scriptingException.getScriptingError();
             message = scriptingError.getDetailedMessage();
-            stack = scriptingError.getStack();
+                stack = sourceMaps.mapStack(scriptingError.getStack());
             if (scriptingError.getLineNumber() >= 1) {
                 String resource = scriptingError.getResourceName() == null
                     ? fallbackResource : scriptingError.getResourceName();
@@ -844,7 +878,8 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             throw new RuntimeModuleResolutionError(
                 pluginId, specifier, "relative require has no CommonJS referrer: " + specifier, null);
         }
-        return canonicalModuleName(commonJsDirectory(referrer) + "/" + specifier);
+        String parent = commonJsDirectory(referrer);
+        return canonicalModuleName(parent + (parent.endsWith("/") ? "" : "/") + specifier);
     }
 
     private static String commonJsDirectory(String canonicalName) {
@@ -874,12 +909,17 @@ public final class ShamooNodeRuntime implements AutoCloseable {
     private static boolean isBuiltin(String name) {
         String canonical = canonicalBuiltin(name);
         return name.startsWith("node:")
-            || SAFE_BUILTINS.contains(canonical)
-            || ALWAYS_DENIED_BUILTINS.contains(canonical);
+            || SAFE_BUILTINS.contains(builtinFamily(canonical))
+            || ALWAYS_DENIED_BUILTINS.contains(builtinFamily(canonical));
     }
 
     private static String canonicalBuiltin(String name) {
         return name.startsWith("node:") ? name : "node:" + name;
+    }
+
+    private static String builtinFamily(String canonical) {
+        int separator = canonical.indexOf('/', "node:".length());
+        return separator < 0 ? canonical : canonical.substring(0, separator);
     }
 
     private String errorText(V8Value value) {
@@ -898,7 +938,7 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             return null;
         }
         try {
-            return object.getString("stack");
+            return sourceMaps.mapStack(object.getString("stack"));
         } catch (JavetException exception) {
             return null;
         }
