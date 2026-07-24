@@ -94,6 +94,16 @@ class JavetPluginHostTest {
         assertEquals(0, stagingEntries());
     }
 
+    @Test
+    void acceptsCompilerSourceMapMetadata() throws Exception {
+        plugin("mapped", "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
+                "export function enable() {}\n");
+        try (JavetPluginHost host = host(new CopyOnWriteArrayList<>())) {
+            host.start(Duration.ofSeconds(30));
+            assertEquals(1, host.runtimeCount());
+        }
+    }
+
     private JavetPluginHost host(List<String> events) {
         SemanticVersion runtime = new SemanticVersion("0.1.0");
         CompatibilityInput input = new CompatibilityInput(PlatformKind.PAPER,
@@ -130,7 +140,8 @@ class JavetPluginHostTest {
         Files.writeString(root.resolve("shamoo.metadata.json"), """
                 {"formatVersion":2,"compilerVersion":"test","packageName":"@fixture/%s",
                 "components":[],"modules":[],%s"entrypoints":{"paper":{"source":"src/plugin.ts",
-                "output":"index.mjs"}}}
+                "output":"index.mjs"}},"sourceMaps":[{"generated":"index.mjs","map":"index.mjs.map",
+                "format":"source-map-v3"}]}
                 """.formatted(name, communication));
         return root;
     }
