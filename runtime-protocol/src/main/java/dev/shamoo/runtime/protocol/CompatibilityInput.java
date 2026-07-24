@@ -6,9 +6,9 @@ import java.util.Set;
 /** Runtime facts used to decide whether a descriptor can be admitted. */
 public record CompatibilityInput(
         PlatformKind platform,
-        SemanticVersion minecraftVersion,
-        SemanticVersion paperApiVersion,
-        SemanticVersion velocityApiVersion,
+        Version minecraftVersion,
+        Version paperApiVersion,
+        Version velocityApiVersion,
         Set<RuntimeCapability> capabilities,
         SemanticVersion runtimeVersion,
         SemanticVersion apiVersion,

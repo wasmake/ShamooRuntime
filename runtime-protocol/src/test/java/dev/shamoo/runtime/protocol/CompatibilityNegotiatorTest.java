@@ -99,8 +99,8 @@ class CompatibilityNegotiatorTest {
                 new SemanticVersion(runtimeVersion), new SemanticVersion(apiVersion), ProtocolVersion.CURRENT);
     }
 
-    private static SemanticVersion versionOrNull(String value) {
-        return value == null ? null : new SemanticVersion(value);
+    private static Version versionOrNull(String value) {
+        return value == null ? null : VersionParser.parse(value);
     }
 
     private static PluginDescriptor descriptor() throws IOException {

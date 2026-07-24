@@ -8,8 +8,8 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import dev.shamoo.runtime.protocol.NodePolicy;
 import dev.shamoo.runtime.protocol.PlatformKind;
 import dev.shamoo.runtime.protocol.PluginDescriptor;
-import dev.shamoo.runtime.protocol.SemanticVersion;
 import dev.shamoo.runtime.protocol.SemverRange;
+import dev.shamoo.runtime.protocol.VersionParser;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -345,7 +345,7 @@ public record ShamooPluginMetadata(
             object(item, path, allowed, allowed);
             String id = text(item, "id", path);
             String version = text(item, "version", path);
-            new SemanticVersion(version);
+            VersionParser.parseSemantic(version);
             if (service) {
                 text(item, "componentId", path);
                 strings(item.path("methods"), path + "/methods");
