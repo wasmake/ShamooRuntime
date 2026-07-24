@@ -105,6 +105,18 @@ class JavetPluginHostTest {
     }
 
     @Test
+    void acceptsCompilerGeneratedCallbackNames() throws Exception {
+        plugin("compiled-callback", "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
+                "host.registerCallback('compiled.src/plugin.ts#EconomyPlugin.pay', () => true);\n");
+        try (JavetPluginHost host = host(new CopyOnWriteArrayList<>())) {
+            host.start(Duration.ofSeconds(30));
+            assertEquals(1, host.runtimeCount());
+            assertEquals(List.of("compiled-callback:true"), host.pluginStatuses().stream()
+                    .map(status -> status.pluginId().value() + ":" + status.active()).toList());
+        }
+    }
+
+    @Test
     void rejectsCorruptMetadataWithoutStoppingValidPlugins() throws Exception {
         List<String> events = new CopyOnWriteArrayList<>();
         plugin("valid", "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
