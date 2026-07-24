@@ -117,7 +117,7 @@ public final class JavaProxyRegistry implements AutoCloseable {
                 throw new IllegalArgumentException("registerCallback requires a name and function");
             }
             String name = arguments[0].asString();
-            if (name == null || !name.matches("[A-Za-z_$][A-Za-z0-9_$.-]*")) {
+            if (name == null || !name.matches("[A-Za-z_$][A-Za-z0-9_$./#-]*")) {
                 throw new IllegalArgumentException("invalid callback name: " + name);
             }
             V8ValueFunction retained = function.toClone(true);
