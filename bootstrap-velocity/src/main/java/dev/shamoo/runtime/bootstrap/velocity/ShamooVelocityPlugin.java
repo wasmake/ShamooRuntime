@@ -81,7 +81,7 @@ public final class ShamooVelocityPlugin {
         java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d+\\.\\d+\\.\\d+)")
                 .matcher(implementation);
         SemanticVersion velocity = new SemanticVersion(matcher.find() ? matcher.group(1) : "3.4.0");
-        SemanticVersion runtime = new SemanticVersion("0.1.0");
+        SemanticVersion runtime = new SemanticVersion(RuntimeBuildVersion.VERSION.split("-", 2)[0]);
         return new CompatibilityInput(PlatformKind.VELOCITY, null, null, velocity,
                 Set.of(RuntimeCapability.NODE_BUILTINS, RuntimeCapability.FILESYSTEM_READ,
                         RuntimeCapability.FILESYSTEM_WRITE), runtime, runtime, ProtocolVersion.CURRENT);
