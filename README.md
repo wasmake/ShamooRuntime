@@ -38,6 +38,10 @@ Paper and Velocity entry points are built independently:
 The bootstrap tasks build platform-specific fat JARs. Paper configuration controls `plugins.directory`, stability,
 watch debounce, and lifecycle timeouts; Velocity accepts `-Dshamoo.plugins.directory=<path>`.
 
+Attested release-candidate JARs are available from [GitHub Releases](https://github.com/wasmake/ShamooRuntime/releases).
+Follow the [release verification and installation guide](docs/releases.md#verify-and-install) before deploying the
+platform-specific artifact.
+
 ## Modules
 
 | Module | Responsibility |
@@ -61,7 +65,7 @@ Cross-plugin service, event, dependent reload, and optional proxy transport beha
 [`docs/contracts-and-messaging.md`](docs/contracts-and-messaging.md).
 Platform generation, threading contracts, cleanup, and exact-version NMS limits are documented in
 [`docs/platform-adapters.md`](docs/platform-adapters.md).
-Supported host/API combinations and non-publishing release-candidate behavior are documented in
+Supported host/API combinations and release-candidate publication behavior are documented in
 [`docs/compatibility.md`](docs/compatibility.md) and [`docs/releases.md`](docs/releases.md).
 
 Generate pinned stable API registries with `./gradlew :runtime-codegen-support:generatePlatformApis`. Generate the

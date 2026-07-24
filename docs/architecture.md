@@ -54,8 +54,8 @@ platform names; the Paper artifact includes and reobfuscates its mapped NMS boun
 package it.
 
 Tagged release candidates are built only after full verification and both process integrations. The workflow creates
-separate platform JARs, checksums, an SPDX SBOM, and GitHub provenance/SBOM attestations, then uploads a temporary
-Actions artifact without release or registry publication. See [`releases.md`](releases.md) and
+separate platform JARs, checksums, an SPDX SBOM, and GitHub provenance/SBOM attestations, then retains an Actions
+artifact and publishes the files in a GitHub prerelease. See [`releases.md`](releases.md) and
 [`compatibility.md`](compatibility.md).
 
 ## Current limits

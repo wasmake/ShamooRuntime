@@ -98,9 +98,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     }
 
     private SemanticVersion runtimeVersion() {
-        String version = getPluginMeta().getVersion();
-        return new SemanticVersion(version.endsWith("-SNAPSHOT")
-                ? version.substring(0, version.length() - "-SNAPSHOT".length()) : version);
+        return new SemanticVersion(RuntimeBuildVersion.VERSION.split("-", 2)[0]);
     }
 
     private PlatformCapabilities platformCapabilities() {

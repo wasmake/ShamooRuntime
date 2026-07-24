@@ -5,6 +5,8 @@ Versioning after its first release.
 
 ## Unreleased
 
+## 0.1.0-rc.1 - 2026-07-24
+
 ### Added
 
 - Phase 7/8 ASM artifact scanning, deterministic bridge descriptors, generated event registries, explicit exclusions,
