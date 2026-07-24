@@ -29,6 +29,7 @@ import java.time.Duration;
 import java.util.Set;
 import java.util.Map;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
@@ -91,12 +92,24 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     }
 
     private CompatibilityInput compatibility() {
-        Version minecraft = VersionParser.parseCalendar(org.bukkit.Bukkit.getMinecraftVersion());
-        String api = org.bukkit.Bukkit.getBukkitVersion().split("-", 2)[0];
-        return new CompatibilityInput(PlatformKind.PAPER, minecraft, VersionParser.parse(api), null,
+        String rawVersion = org.bukkit.Bukkit.getBukkitVersion();
+        String minecraftVersion = normalizeMinecraftVersion(rawVersion);
+        Version version = VersionParser.parse(minecraftVersion);
+        return new CompatibilityInput(PlatformKind.PAPER, version, version, null,
                 Set.of(RuntimeCapability.NODE_BUILTINS, RuntimeCapability.FILESYSTEM_READ,
                         RuntimeCapability.FILESYSTEM_WRITE), runtimeVersion(), runtimeVersion(),
                 ProtocolVersion.CURRENT);
+    }
+
+    /**
+     * Temporarily adapts Paper's Bukkit artifact version to the version formats understood by compatibility parsing.
+     */
+    // TODO: Remove this workaround once compatibility uses the dedicated
+    // Minecraft version instead of the Bukkit artifact version.
+    private static String normalizeMinecraftVersion(String version) {
+        Objects.requireNonNull(version, "version");
+        int buildIndex = version.indexOf(".build.");
+        return buildIndex >= 0 ? version.substring(0, buildIndex) : version;
     }
 
     private SemanticVersion runtimeVersion() {
