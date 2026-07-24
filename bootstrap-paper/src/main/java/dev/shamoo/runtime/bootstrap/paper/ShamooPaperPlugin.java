@@ -12,6 +12,7 @@ import dev.shamoo.runtime.protocol.ProtocolVersion;
 import dev.shamoo.runtime.protocol.RuntimeCapability;
 import dev.shamoo.runtime.protocol.SemanticVersion;
 import dev.shamoo.runtime.platform.paper.GeneratedPaperEventRegistry;
+import dev.shamoo.runtime.platform.paper.PaperCommandContextBridge;
 import dev.shamoo.runtime.platform.paper.PaperEventBridge;
 import dev.shamoo.runtime.platform.paper.PaperCommandBridge;
 import dev.shamoo.runtime.platform.paper.PaperSchedulerBridge;
@@ -35,12 +36,14 @@ import org.bukkit.event.EventPriority;
 /** Paper entry point that owns the native runtime lifecycle. */
 public final class ShamooPaperPlugin extends JavaPlugin {
     private static final PluginId RUNTIME_OWNER = new PluginId("shamooruntime");
+    private static final String PLATFORM_ARGUMENT = "platform binding argument ";
     private JavetPluginHost pluginHost;
     private final ResourceRegistry packetResources = new ResourceRegistry();
     private final ResourceRegistry platformResources = new ResourceRegistry();
     private GeneratedPaperEventRegistry eventRegistry;
     private PaperEventBridge eventBridge;
     private PaperCommandBridge commandBridge;
+    private PaperCommandContextBridge commandContextBridge;
     private PaperSchedulerBridge schedulerBridge;
     private PaperMessagingBridge messagingBridge;
     private OptionalProxyTransport proxyTransport;
@@ -53,6 +56,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
             eventRegistry = GeneratedPaperEventRegistry.load(getClassLoader());
             eventBridge = new PaperEventBridge(this, platformResources);
             commandBridge = new PaperCommandBridge(this, platformResources);
+            commandContextBridge = new PaperCommandContextBridge(getServer());
             schedulerBridge = new PaperSchedulerBridge(this, platformResources);
             messagingBridge = new PaperMessagingBridge(this, platformResources);
             proxyTransport = platformResources.register(new OptionalProxyTransport(Duration.ofSeconds(3)));
@@ -100,34 +104,42 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     }
 
     private PlatformCapabilities platformCapabilities() {
-        return new PlatformCapabilities("paper", Map.of(
-                "paperSubscribeEvent", (owner, metadata, arguments) -> {
+        return new PlatformCapabilities("paper", Map.ofEntries(
+                Map.entry("paperSubscribeEvent", (owner, metadata, arguments) -> {
                     return eventBridge.subscribe(owner, eventRegistry, string(arguments, 0),
                             EventPriority.valueOf(string(arguments, 1)), bool(arguments, 2),
                             event -> typed(arguments, 3, ScriptCallback.class).invoke(List.of(Map.of(
                                     "type", event.getEventName(), "asynchronous", event.isAsynchronous())))
                                     .toCompletableFuture().join());
-                },
-                "paperRegisterCommand", (owner, metadata, arguments) -> {
+                }),
+                Map.entry("paperRegisterCommand", (owner, metadata, arguments) -> {
                     return commandBridge.register(owner, string(arguments, 0), strings(arguments, 1),
-                            (sender, alias, values) -> Boolean.TRUE.equals(typed(arguments, 2, ScriptCallback.class)
-                                    .invoke(List.of(Map.of("sender", sender.getName(), "alias", alias,
-                                            "arguments", values))).toCompletableFuture().join()));
-                },
-                "paperScheduleGlobal", (owner, metadata, arguments) -> {
+                            (sender, alias, values) -> commandContextBridge.execute(sender, alias, values,
+                                    context -> typed(arguments, 2, ScriptCallback.class).invoke(List.of(context))));
+                }),
+                Map.entry("paperCommandReply", (owner, metadata, arguments) -> commandContextBridge.reply(
+                        string(arguments, 0), string(arguments, 1))),
+                Map.entry("paperCommandFindPlayer", (owner, metadata, arguments) -> commandContextBridge.findPlayer(
+                        string(arguments, 0), string(arguments, 1))),
+                Map.entry("paperCommandMainHand", (owner, metadata, arguments) -> commandContextBridge.mainHand(
+                        string(arguments, 0))),
+                Map.entry("paperCommandTakeMainHand", (owner, metadata, arguments) -> commandContextBridge.takeMainHand(
+                        string(arguments, 0), string(arguments, 1), integer(arguments, 2))),
+                Map.entry("paperScheduleGlobal", (owner, metadata, arguments) -> {
                     ScriptCallback callback = typed(arguments, 0, ScriptCallback.class);
                     return schedulerBridge.runGlobal(owner, () -> callback.invoke(List.of()));
-                },
-                "paperRegisterMessaging", (owner, metadata, arguments) -> {
+                }),
+                Map.entry("paperRegisterMessaging", (owner, metadata, arguments) -> {
                     return messagingBridge.register(owner, string(arguments, 0),
                             (channel, player, payload) -> typed(arguments, 1, ScriptCallback.class).invoke(List.of(
                                     Map.of("channel", channel, "playerId", player.getUniqueId().toString(),
                                             "payload", payload.clone()))));
-                },
-                "paperProxyCarrier", (owner, metadata, arguments) -> messagingBridge.selectCarrier(proxyTransport),
-                "paperProxyRequest", (owner, metadata, arguments) -> proxyTransport.request(
-                        typed(arguments, 0, byte[].class)),
-                "paperSubscribePacket", (owner, metadata, arguments) -> {
+                }),
+                Map.entry("paperProxyCarrier", (owner, metadata, arguments) ->
+                        messagingBridge.selectCarrier(proxyTransport)),
+                Map.entry("paperProxyRequest", (owner, metadata, arguments) -> proxyTransport.request(
+                        typed(arguments, 0, byte[].class))),
+                Map.entry("paperSubscribePacket", (owner, metadata, arguments) -> {
                     ScriptCallback callback = typed(arguments, 0, ScriptCallback.class);
                     return subscribePackets(owner, packet -> callback.invoke(List.of(Map.of(
                             "direction", packet.direction().name(), "phase", packet.phase().name(),
@@ -140,7 +152,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
                                 return Boolean.TRUE.equals(decision.get("cancelled"))
                                         ? PaperPacketBridge.Decision.cancel() : PaperPacketBridge.Decision.pass();
                             }));
-                }));
+                })));
     }
 
     private static String string(java.util.List<Object> arguments, int index) {
@@ -151,18 +163,30 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         return typed(arguments, index, Boolean.class);
     }
 
+    private static int integer(java.util.List<Object> arguments, int index) {
+        Object value = index < arguments.size() ? arguments.get(index) : null;
+        if (!(value instanceof Number number)) {
+            throw new IllegalArgumentException(PLATFORM_ARGUMENT + index + " must be an integer");
+        }
+        long result = number.longValue();
+        if (result < Integer.MIN_VALUE || result > Integer.MAX_VALUE || number.doubleValue() != result) {
+            throw new IllegalArgumentException(PLATFORM_ARGUMENT + index + " must be an integer");
+        }
+        return (int) result;
+    }
+
     private static java.util.List<String> strings(java.util.List<Object> arguments, int index) {
         Object value = arguments.get(index);
         if (!(value instanceof java.util.List<?> values)
                 || values.stream().anyMatch(item -> !(item instanceof String))) {
-            throw new IllegalArgumentException("platform binding argument " + index + " must be a string array");
+            throw new IllegalArgumentException(PLATFORM_ARGUMENT + index + " must be a string array");
         }
         return values.stream().map(String.class::cast).toList();
     }
 
     private static <T> T typed(java.util.List<Object> arguments, int index, Class<T> type) {
         if (index >= arguments.size() || !type.isInstance(arguments.get(index))) {
-            throw new IllegalArgumentException("platform binding argument " + index + " must be " + type.getName());
+            throw new IllegalArgumentException(PLATFORM_ARGUMENT + index + " must be " + type.getName());
         }
         return type.cast(arguments.get(index));
     }
