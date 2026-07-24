@@ -92,7 +92,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     }
 
     private CompatibilityInput compatibility() {
-        String rawVersion = org.bukkit.Bukkit.getBukkitVersion();
+        String rawVersion = org.bukkit.Bukkit.getBukkitVersion().split("-", 2)[0];
         String minecraftVersion = normalizeMinecraftVersion(rawVersion);
         Version version = VersionParser.parse(minecraftVersion);
         return new CompatibilityInput(PlatformKind.PAPER, version, version, null,
