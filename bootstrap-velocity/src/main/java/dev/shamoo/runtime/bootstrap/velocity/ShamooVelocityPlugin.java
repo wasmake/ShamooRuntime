@@ -13,6 +13,8 @@ import dev.shamoo.runtime.protocol.PlatformKind;
 import dev.shamoo.runtime.protocol.ProtocolVersion;
 import dev.shamoo.runtime.protocol.RuntimeCapability;
 import dev.shamoo.runtime.protocol.SemanticVersion;
+import dev.shamoo.runtime.protocol.Version;
+import dev.shamoo.runtime.protocol.VersionParser;
 import dev.shamoo.runtime.platform.velocity.GeneratedVelocityEventRegistry;
 import dev.shamoo.runtime.platform.velocity.VelocityEventBridge;
 import dev.shamoo.runtime.core.PluginId;
@@ -80,8 +82,8 @@ public final class ShamooVelocityPlugin {
         String implementation = server.getVersion().getVersion();
         java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d+\\.\\d+\\.\\d+)")
                 .matcher(implementation);
-        SemanticVersion velocity = new SemanticVersion(matcher.find() ? matcher.group(1) : "3.4.0");
-        SemanticVersion runtime = new SemanticVersion(RuntimeBuildVersion.VERSION.split("-", 2)[0]);
+        Version velocity = VersionParser.parse(matcher.find() ? matcher.group(1) : "3.4.0");
+        SemanticVersion runtime = VersionParser.parseSemantic(RuntimeBuildVersion.VERSION.split("-", 2)[0]);
         return new CompatibilityInput(PlatformKind.VELOCITY, null, null, velocity,
                 Set.of(RuntimeCapability.NODE_BUILTINS, RuntimeCapability.FILESYSTEM_READ,
                         RuntimeCapability.FILESYSTEM_WRITE), runtime, runtime, ProtocolVersion.CURRENT);

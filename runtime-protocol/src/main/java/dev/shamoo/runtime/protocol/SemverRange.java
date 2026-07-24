@@ -2,7 +2,9 @@ package dev.shamoo.runtime.protocol;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
+import java.util.Objects;
 import java.util.regex.Pattern;
+import org.semver4j.Semver;
 import org.semver4j.range.RangeList;
 import org.semver4j.range.RangeListFactory;
 
@@ -50,5 +52,15 @@ public record SemverRange(@JsonValue String value) {
     public boolean includes(SemanticVersion version) {
         RangeList ranges = RangeListFactory.create(value);
         return version.parsed().satisfies(ranges);
+    }
+
+    /** Evaluates either supported version scheme against this numeric range. */
+    public boolean includes(Version version) {
+        Objects.requireNonNull(version, "version");
+        if (version instanceof SemanticVersion semantic) {
+            return includes(semantic);
+        }
+        String normalized = version.major() + "." + version.minor() + "." + version.patch();
+        return Semver.parse(normalized).satisfies(RangeListFactory.create(value));
     }
 }

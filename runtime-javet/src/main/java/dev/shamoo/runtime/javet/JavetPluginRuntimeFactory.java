@@ -20,6 +20,7 @@ import dev.shamoo.runtime.protocol.EventContract;
 import dev.shamoo.runtime.protocol.SemanticVersion;
 import dev.shamoo.runtime.protocol.SemverRange;
 import dev.shamoo.runtime.protocol.ServiceContract;
+import dev.shamoo.runtime.protocol.VersionParser;
 
 /** Adapts the Javet manager to the engine-neutral core lifecycle factory contract. */
 public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
@@ -119,7 +120,7 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
             Map<String, PluginServiceProxy> proxies) {
         putBinding(bindings, "shamooProvideService", arguments -> {
             String name = string(arguments, 0);
-            SemanticVersion version = new SemanticVersion(string(arguments, 1));
+            SemanticVersion version = VersionParser.parseSemantic(string(arguments, 1));
             if (!version.value().equals(metadata.services().get(name))) {
                 throw new SecurityException("compiled metadata does not authorize service provider " + name);
             }
@@ -163,7 +164,7 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
         putBinding(bindings, "shamooPublishEvent", arguments -> {
             authorizeEvent(metadata, arguments);
             return context.events().publish(
-                    new EventContract(string(arguments, 0), new SemanticVersion(string(arguments, 1))),
+                    new EventContract(string(arguments, 0), VersionParser.parseSemantic(string(arguments, 1))),
                     arguments.get(2));
         });
         putBinding(bindings, "shamooMetadata", arguments -> {

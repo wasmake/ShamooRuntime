@@ -11,6 +11,8 @@ import dev.shamoo.runtime.protocol.PlatformKind;
 import dev.shamoo.runtime.protocol.ProtocolVersion;
 import dev.shamoo.runtime.protocol.RuntimeCapability;
 import dev.shamoo.runtime.protocol.SemanticVersion;
+import dev.shamoo.runtime.protocol.Version;
+import dev.shamoo.runtime.protocol.VersionParser;
 import dev.shamoo.runtime.platform.paper.GeneratedPaperEventRegistry;
 import dev.shamoo.runtime.platform.paper.PaperCommandContextBridge;
 import dev.shamoo.runtime.platform.paper.PaperEventBridge;
@@ -89,16 +91,16 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     }
 
     private CompatibilityInput compatibility() {
-        SemanticVersion minecraft = new SemanticVersion(org.bukkit.Bukkit.getMinecraftVersion());
+        Version minecraft = VersionParser.parseCalendar(org.bukkit.Bukkit.getMinecraftVersion());
         String api = org.bukkit.Bukkit.getBukkitVersion().split("-", 2)[0];
-        return new CompatibilityInput(PlatformKind.PAPER, minecraft, new SemanticVersion(api), null,
+        return new CompatibilityInput(PlatformKind.PAPER, minecraft, VersionParser.parse(api), null,
                 Set.of(RuntimeCapability.NODE_BUILTINS, RuntimeCapability.FILESYSTEM_READ,
                         RuntimeCapability.FILESYSTEM_WRITE), runtimeVersion(), runtimeVersion(),
                 ProtocolVersion.CURRENT);
     }
 
     private SemanticVersion runtimeVersion() {
-        return new SemanticVersion(RuntimeBuildVersion.VERSION.split("-", 2)[0]);
+        return VersionParser.parseSemantic(RuntimeBuildVersion.VERSION.split("-", 2)[0]);
     }
 
     private PlatformCapabilities platformCapabilities() {

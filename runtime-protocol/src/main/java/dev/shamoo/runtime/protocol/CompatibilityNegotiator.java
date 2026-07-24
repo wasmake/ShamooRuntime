@@ -63,10 +63,10 @@ public final class CompatibilityNegotiator {
             List<IncompatibilityReason> reasons,
             String code,
             String label,
-            SemanticVersion actual,
+            Version actual,
             SemverRange requested) {
         if (!requested.includes(actual)) {
-            reasons.add(reason(code, label + " " + actual.value() + " does not satisfy " + requested.value()));
+            reasons.add(reason(code, label + " " + actual.original() + " does not satisfy " + requested.value()));
         }
     }
 
