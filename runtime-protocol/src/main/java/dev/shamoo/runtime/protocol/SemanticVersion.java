@@ -78,8 +78,12 @@ public record SemanticVersion(@JsonValue String value) implements Version {
 
     static void validate(String value, String path) {
         ManifestValidation.text(value, path);
-        if (!STRICT_SEMVER.matcher(value).matches() || Semver.parse(value) == null) {
+        if (!isValid(value)) {
             ManifestValidation.fail("invalid_semver", path, "is not a strict semantic version: " + value);
         }
+    }
+
+    static boolean isValid(String value) {
+        return value != null && STRICT_SEMVER.matcher(value).matches() && Semver.parse(value) != null;
     }
 }

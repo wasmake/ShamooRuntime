@@ -40,6 +40,26 @@ public final class CalendarVersion implements Version {
         sourceValue = value;
     }
 
+    static boolean isValid(String value) {
+        if (value == null) {
+            return false;
+        }
+        Matcher matcher = CALENDAR_VERSION.matcher(value);
+        if (!matcher.matches()) {
+            return false;
+        }
+        try {
+            Integer.parseInt(matcher.group(1));
+            Integer.parseInt(matcher.group(2));
+            if (matcher.group(3) != null) {
+                Integer.parseInt(matcher.group(3));
+            }
+            return true;
+        } catch (NumberFormatException exception) {
+            return false;
+        }
+    }
+
     /** Parses a calendar version and reports validation against the supplied JSON pointer. */
     public static CalendarVersion parse(String value, String path) {
         return new CalendarVersion(value, path);
