@@ -2,11 +2,14 @@
 
 ShamooRuntime is a Java 21 foundation for embedding a JavaScript runtime in Paper and Velocity plugins. The runtime
 defines module and lifecycle boundaries, separately packaged platform adapters, the plugin manifest protocol, and a
-Phase 6 plugin lifecycle foundation. Manifest v1 provides strict JSON decoding, immutable policy models,
+production plugin lifecycle host. Manifest v1 provides strict JSON decoding, immutable policy models,
 semantic-version negotiation, and admission validation. Secure discovery, deterministic dependency ordering,
 serialized hooks, invocation draining, quarantine, and typed resource ownership coordinate each confined plugin Node
 isolate without exposing Javet through core APIs. Phases 7 and 8 add generated stable platform surfaces, owned Paper
-and Velocity adapters, and a separately versioned opt-in Paper packet boundary.
+and Velocity adapters, a separately versioned opt-in Paper packet boundary, and Phase 10 generation-safe cross-plugin
+contracts with optional Paper to Velocity messaging.
+Phases 9 through 12 add watched transactional installation, generation-keyed Javet runtimes, lifecycle and hot-state
+entrypoint hooks, data-only JS service/event/platform callbacks, and attested release-candidate automation.
 
 ## Requirements
 
@@ -32,8 +35,8 @@ Paper and Velocity entry points are built independently:
 ./gradlew :bootstrap-paper:reobfJar :bootstrap-velocity:jar
 ```
 
-The bootstrap JARs currently preserve dependencies as separate artifacts; dependency bundling and distribution
-packaging are intentionally deferred until runtime loading policy is defined.
+The bootstrap tasks build platform-specific fat JARs. Paper configuration controls `plugins.directory`, stability,
+watch debounce, and lifecycle timeouts; Velocity accepts `-Dshamoo.plugins.directory=<path>`.
 
 ## Modules
 
@@ -54,8 +57,12 @@ packaging are intentionally deferred until runtime loading policy is defined.
 See [`docs/protocol.md`](docs/protocol.md), [`docs/runtime.md`](docs/runtime.md),
 [`docs/lifecycle.md`](docs/lifecycle.md), [`docs/architecture.md`](docs/architecture.md), and [`docs/adr`](docs/adr) for
 wire, dependency, and lifecycle decisions.
+Cross-plugin service, event, dependent reload, and optional proxy transport behavior is documented in
+[`docs/contracts-and-messaging.md`](docs/contracts-and-messaging.md).
 Platform generation, threading contracts, cleanup, and exact-version NMS limits are documented in
 [`docs/platform-adapters.md`](docs/platform-adapters.md).
+Supported host/API combinations and non-publishing release-candidate behavior are documented in
+[`docs/compatibility.md`](docs/compatibility.md) and [`docs/releases.md`](docs/releases.md).
 
 Generate pinned stable API registries with `./gradlew :runtime-codegen-support:generatePlatformApis`. Generate the
 separate unstable NMS registry with

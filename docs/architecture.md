@@ -23,6 +23,11 @@ Stable platform descriptors are generated from pinned bytecode without classload
 transport are a separate exact-version boundary and are never imported by Velocity. See `platform-adapters.md` and ADR
 0005.
 
+Generated operation adapters are cached per immutable `PlatformCapabilities` instance by operation name, namespace,
+type name, and protocol version. Cached values contain only platform-owned operations and immutable metadata; plugin
+identity is supplied per invocation, so retired plugin generations, runtimes, and class loaders are never cache keys
+or values. Namespace and protocol checks occur on every operation boundary before adapter lookup.
+
 ## Runtime contract
 
 `ScriptRuntime.execute` accepts immutable `ScriptRequest` values and returns asynchronous `ScriptResult` values.
@@ -39,7 +44,8 @@ variants rather than runtime guessing. See [`runtime.md`](runtime.md) and ADR 00
 Runtime plugin directories are inventoried only after a stable-file window. Strict descriptors and SHA-256 inventories
 form immutable installed candidates. A deterministic dependency graph controls enable and reverse-disable order.
 Lifecycle calls are serialized per plugin, active invocations drain before disable, and typed plugin-owned resources
-clean up in reverse order. See [`lifecycle.md`](lifecycle.md) and ADR 0004.
+clean up in reverse order. Stable candidate changes can prepare, migrate, and atomically publish an isolated runtime
+generation without exposing failed candidates. See [`lifecycle.md`](lifecycle.md) and ADR 0004.
 
 ## Artifact boundaries
 
@@ -47,10 +53,15 @@ Library modules publish normal Java library JARs with source and Javadoc variant
 platform names; the Paper artifact includes and reobfuscates its mapped NMS boundary, while Velocity does not load or
 package it.
 
+Tagged release candidates are built only after full verification and both process integrations. The workflow creates
+separate platform JARs, checksums, an SPDX SBOM, and GitHub provenance/SBOM attestations, then uploads a temporary
+Actions artifact without release or registry publication. See [`releases.md`](releases.md) and
+[`compatibility.md`](compatibility.md).
+
 ## Current limits
 
 The runtime enforces a deny-by-default subset of `NodePolicy` at runtime-controlled boundaries. Native Node paths that
-Javet cannot mediate securely remain disabled even when requested. Phase 6 defines staging but not transactional
-candidate swap or rollback. TypeScript transformation, hot reload, dependency installation, distribution shading,
-remain outside the current implementation. Full Paper and Velocity process harnesses are opt-in Gradle tasks and CI
+Javet cannot mediate securely remain disabled even when requested. Persisted reload journals, TypeScript
+transformation, dependency installation, and distribution shading remain outside the current implementation. Full
+Paper and Velocity process harnesses are opt-in Gradle tasks and CI
 workflow-dispatch jobs because each downloads and starts a complete server.
