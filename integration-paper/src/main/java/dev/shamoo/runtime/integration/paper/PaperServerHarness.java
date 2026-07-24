@@ -41,6 +41,9 @@ public final class PaperServerHarness {
         Files.createDirectories(scriptPlugins);
         createScriptPlugin(scriptPlugins, "fixture-one");
         createScriptPlugin(scriptPlugins, "fixture-two");
+        createScriptPlugin(scriptPlugins, "corrupt");
+        Files.writeString(scriptPlugins.resolve("corrupt/shamoo.metadata.json"), "{\"formatVersion\":2}",
+                StandardCharsets.UTF_8);
         Files.writeString(pluginData.resolve("config.yml"), "plugins:\n  directory: scripts\n"
                 + "  stability-millis: 0\n  watch-debounce-millis: 100\n"
                 + "  hook-timeout-millis: 5000\n  drain-timeout-millis: 5000\n"
@@ -67,6 +70,7 @@ public final class PaperServerHarness {
                 throw new IllegalStateException("Paper did not initialize ShamooRuntime; inspect " + log);
             }
             verifyStatusPacketPath(port, log);
+            verifyRuntimeCommands(process, log);
         } finally {
             if (process.isAlive()) {
                 process.getOutputStream().write("stop\n".getBytes(StandardCharsets.UTF_8));
@@ -141,6 +145,23 @@ public final class PaperServerHarness {
             Thread.sleep(50);
         }
         throw new IllegalStateException("Paper packet subscriber metric was not observed; inspect " + log);
+    }
+
+    private static void verifyRuntimeCommands(Process process, Path log) throws IOException, InterruptedException {
+        process.getOutputStream().write("ping\nplugins\n".getBytes(StandardCharsets.UTF_8));
+        process.getOutputStream().flush();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (Files.exists(log)) {
+                String output = Files.readString(log);
+                if (output.contains("pong") && output.contains("Shamoo Plugins (3):")
+                        && output.contains("Plugin admission rejected for corrupt")) {
+                    return;
+                }
+            }
+            Thread.sleep(50);
+        }
+        throw new IllegalStateException("Paper runtime commands were not observed; inspect " + log);
     }
 
     private static void writePacket(OutputStream output, int id, byte[] payload) throws IOException {

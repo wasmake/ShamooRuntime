@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.Comparator;
 import java.util.concurrent.CompletableFuture;
@@ -46,6 +47,7 @@ public final class JavetPluginHost implements AutoCloseable {
     });
     private final Map<PluginId, InstalledPluginCandidate> candidates = new LinkedHashMap<>();
     private final Map<Path, PluginId> sourceIdentities = new LinkedHashMap<>();
+    private final Set<PluginId> rejectedCandidates = new java.util.LinkedHashSet<>();
     private final System.Logger logger;
     private PluginDirectoryWatcher watcher;
     private boolean started;
@@ -84,10 +86,22 @@ public final class JavetPluginHost implements AutoCloseable {
         PluginDiscoveryResult result = discovery.discover(pluginsDirectory);
         result.errors().forEach(error -> logger.log(System.Logger.Level.ERROR, error.getMessage(), error));
         for (InstalledPluginCandidate candidate : result.candidates()) {
-            admit(candidate);
+            try {
+                admit(candidate);
+            } catch (IllegalArgumentException exception) {
+                rejectedCandidates.add(candidate.pluginId());
+                try {
+                    deleteSnapshot(candidate.root());
+                } catch (RuntimeException cleanupFailure) {
+                    exception.addSuppressed(cleanupFailure);
+                }
+                logger.log(System.Logger.Level.ERROR,
+                        "Plugin admission rejected for " + candidate.pluginId(), exception);
+            }
         }
         coordinator.install(candidates.values());
-        coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
+        coordinator.enableAll(UUID.randomUUID(), (pluginId, failure) -> logger.log(System.Logger.Level.ERROR,
+                "Plugin lifecycle startup failed for " + pluginId, failure)).toCompletableFuture().join();
         indexSources();
         watcher = new PluginDirectoryWatcher(pluginsDirectory, watcherQuietWindow, this::watcherChanged,
                 error -> logger.log(System.Logger.Level.ERROR, "Plugin directory watcher failed", error));
@@ -138,6 +152,20 @@ public final class JavetPluginHost implements AutoCloseable {
         return coordinator.snapshots();
     }
 
+    public List<HostedPluginStatus> pluginStatuses() {
+        List<PluginIntrospectionSnapshot> snapshots = coordinator.snapshots();
+        Map<PluginId, HostedPluginStatus> statuses = new LinkedHashMap<>();
+        snapshots.forEach(snapshot -> statuses.put(snapshot.pluginId(),
+                new HostedPluginStatus(snapshot.pluginId(), snapshot.invocations().accepting())));
+        synchronized (this) {
+            rejectedCandidates.forEach(pluginId -> statuses.putIfAbsent(pluginId,
+                    new HostedPluginStatus(pluginId, false)));
+        }
+        return statuses.values().stream().sorted(java.util.Comparator
+                .comparing(HostedPluginStatus::active).reversed()
+                .thenComparing(status -> status.pluginId().value())).toList();
+    }
+
     public int runtimeCount() {
         return runtimeManager.size();
     }
@@ -145,7 +173,18 @@ public final class JavetPluginHost implements AutoCloseable {
     private CompletionStage<Void> installNow(Path source) {
         try {
             InstalledPluginCandidate candidate = discovery.stage(source, stagingDirectory);
-            admitCompatibility(candidate);
+            try {
+                admitCompatibility(candidate);
+            } catch (IllegalArgumentException exception) {
+                deleteSnapshot(candidate.root());
+                synchronized (this) {
+                    if (!candidates.containsKey(candidate.pluginId())) {
+                        rejectedCandidates.add(candidate.pluginId());
+                        sourceIdentities.put(source.toAbsolutePath().normalize(), candidate.pluginId());
+                    }
+                }
+                throw exception;
+            }
             InstalledPluginCandidate previous;
             synchronized (this) {
                 previous = candidates.get(candidate.pluginId());
@@ -155,6 +194,7 @@ public final class JavetPluginHost implements AutoCloseable {
                     == dev.shamoo.runtime.core.PluginLifecycleState.UNLOADED;
             if (previous == null || unloaded) {
                 synchronized (this) {
+                    rejectedCandidates.remove(candidate.pluginId());
                     candidates.put(candidate.pluginId(), candidate);
                     sourceIdentities.put(source.toAbsolutePath().normalize(), candidate.pluginId());
                     coordinator.install(candidates.values());
@@ -165,6 +205,7 @@ public final class JavetPluginHost implements AutoCloseable {
             } else {
                 operation = coordinator.replace(candidate, UUID.randomUUID()).thenRun(() -> {
                     synchronized (this) {
+                        rejectedCandidates.remove(candidate.pluginId());
                         candidates.put(candidate.pluginId(), candidate);
                         sourceIdentities.put(source.toAbsolutePath().normalize(), candidate.pluginId());
                     }
@@ -198,6 +239,11 @@ public final class JavetPluginHost implements AutoCloseable {
             if (removed == null) {
                 return CompletableFuture.completedFuture(null);
             }
+            synchronized (this) {
+                if (rejectedCandidates.remove(removed) && !candidates.containsKey(removed)) {
+                    return CompletableFuture.completedFuture(null);
+                }
+            }
             return coordinator.disable(removed, UUID.randomUUID())
                     .thenCompose(ignored -> coordinator.unload(removed, UUID.randomUUID()))
                     .thenRun(() -> {
@@ -218,6 +264,7 @@ public final class JavetPluginHost implements AutoCloseable {
 
     private synchronized void admit(InstalledPluginCandidate candidate) {
         admitCompatibility(candidate);
+        rejectedCandidates.remove(candidate.pluginId());
         candidates.put(candidate.pluginId(), candidate);
     }
 
@@ -238,7 +285,7 @@ public final class JavetPluginHost implements AutoCloseable {
                 try {
                     String descriptorJson = Files.readString(path.resolve(PluginDiscovery.DESCRIPTOR_FILE));
                     PluginId pluginId = new PluginId(codec.parse(descriptorJson).name());
-                    if (candidates.containsKey(pluginId)) {
+                    if (candidates.containsKey(pluginId) || rejectedCandidates.contains(pluginId)) {
                         sourceIdentities.put(path.toAbsolutePath().normalize(), pluginId);
                     }
                 } catch (IOException | RuntimeException exception) {

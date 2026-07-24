@@ -30,6 +30,9 @@ public final class VelocityServerHarness {
         Files.createDirectories(scriptPlugins);
         createScriptPlugin(scriptPlugins, "fixture-one");
         createScriptPlugin(scriptPlugins, "fixture-two");
+        createScriptPlugin(scriptPlugins, "corrupt");
+        Files.writeString(scriptPlugins.resolve("corrupt/shamoo.metadata.json"), "{\"formatVersion\":2}",
+                StandardCharsets.UTF_8);
         Files.writeString(work.resolve("velocity.toml"), "bind = \"127.0.0.1:0\"\n",
                 StandardCharsets.UTF_8);
         Files.copy(Path.of(arguments[1]), plugins.resolve("ShamooRuntime.jar"), StandardCopyOption.REPLACE_EXISTING);
@@ -44,6 +47,7 @@ public final class VelocityServerHarness {
             if (!ready.await(READY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
                 throw new IllegalStateException("Velocity did not initialize ShamooRuntime; inspect " + log);
             }
+            verifyRuntimeCommands(process, log);
         } finally {
             if (process.isAlive()) {
                 process.getOutputStream().write("shutdown\n".getBytes(StandardCharsets.UTF_8));
@@ -83,6 +87,24 @@ public final class VelocityServerHarness {
                 + "\"builtins\":[],\"filesystem\":{\"read\":[],\"write\":[]},\"network\":false,"
                 + "\"workers\":false,\"childProcess\":false,\"nativeAddons\":false},\"reload\":{"
                 + "\"watch\":true,\"debounceMs\":100,\"preserveState\":true}}";
+    }
+
+    private static void verifyRuntimeCommands(Process process, Path log) throws IOException, InterruptedException {
+        process.getOutputStream().write("ping\nplugins\n".getBytes(StandardCharsets.UTF_8));
+        process.getOutputStream().flush();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (Files.exists(log)) {
+                String output = Files.readString(log);
+                if (output.contains("pong") && output.contains("Velocity Plugins")
+                        && output.contains("Shamoo Plugins (3):")
+                        && output.contains("Plugin admission rejected for corrupt")) {
+                    return;
+                }
+            }
+            Thread.sleep(50);
+        }
+        throw new IllegalStateException("Velocity runtime commands were not observed; inspect " + log);
     }
 
     private static void readOutput(Process process, Path log, CountDownLatch ready) {

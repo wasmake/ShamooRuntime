@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -150,6 +151,26 @@ public final class PluginLifecycleCoordinator {
                 sequence = sequence.thenCompose(ignored -> doLoad(managed, correlationId))
                         .thenCompose(ignored -> doEnable(managed, correlationId))
                         .thenCompose(ignored -> doReady(managed, correlationId));
+            }
+            return sequence;
+        });
+    }
+
+    public CompletionStage<Void> enableAll(UUID correlationId, BiConsumer<PluginId, Throwable> failureHandler) {
+        Objects.requireNonNull(failureHandler, "failureHandler");
+        return serialized(() -> {
+            CompletionStage<Void> sequence = completed();
+            for (PluginId id : resolution.enableOrder()) {
+                ManagedPlugin managed = plugin(id);
+                sequence = sequence.thenCompose(ignored -> doLoad(managed, correlationId)
+                        .thenCompose(loaded -> doEnable(managed, correlationId))
+                        .thenCompose(enabled -> doReady(managed, correlationId))
+                        .handle((ready, failure) -> {
+                            if (failure != null) {
+                                failureHandler.accept(id, failure);
+                            }
+                            return null;
+                        }));
             }
             return sequence;
         });
