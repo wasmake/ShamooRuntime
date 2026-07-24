@@ -5,7 +5,6 @@ import dev.shamoo.runtime.core.RuntimeHost;
 import dev.shamoo.runtime.core.RuntimeInitializationException;
 import dev.shamoo.runtime.core.ScriptRuntime;
 import dev.shamoo.runtime.core.PlatformCapabilities;
-import dev.shamoo.runtime.core.CompiledBindingMetadata;
 import dev.shamoo.runtime.protocol.FilesystemPolicy;
 import dev.shamoo.runtime.protocol.NodePolicy;
 import dev.shamoo.runtime.protocol.ProtocolVersion;
@@ -54,8 +53,7 @@ public final class JavetScriptRuntime implements ScriptRuntime {
                 if (arguments.isEmpty() || !(arguments.getFirst() instanceof Map<?, ?> metadata)) {
                     throw new IllegalArgumentException(name + " requires compiled binding metadata");
                 }
-                return operation.invoke(owner, CompiledBindingMetadata.from(metadata),
-                        arguments.subList(1, arguments.size()));
+                return capabilities.invoke(name, owner, metadata, arguments.subList(1, arguments.size()));
                     }));
             delegate = ShamooNodeRuntime.create(
                 owner,

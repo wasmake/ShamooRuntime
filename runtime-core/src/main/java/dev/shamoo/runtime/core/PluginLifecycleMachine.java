@@ -63,9 +63,11 @@ public final class PluginLifecycleMachine {
         Map<PluginLifecycleState, Set<PluginLifecycleState>> transitions =
                 new EnumMap<>(PluginLifecycleState.class);
         allow(transitions, PluginLifecycleState.DISCOVERED,
-                PluginLifecycleState.BLOCKED, PluginLifecycleState.LOADING, PluginLifecycleState.QUARANTINED);
+                PluginLifecycleState.BLOCKED, PluginLifecycleState.LOADING, PluginLifecycleState.UNLOADING,
+                PluginLifecycleState.QUARANTINED);
         allow(transitions, PluginLifecycleState.BLOCKED,
-                PluginLifecycleState.DISCOVERED, PluginLifecycleState.QUARANTINED);
+                PluginLifecycleState.DISCOVERED, PluginLifecycleState.UNLOADING,
+                PluginLifecycleState.QUARANTINED);
         allow(transitions, PluginLifecycleState.LOADING,
                 PluginLifecycleState.LOADED, PluginLifecycleState.LOAD_FAILED);
         allow(transitions, PluginLifecycleState.LOAD_FAILED,

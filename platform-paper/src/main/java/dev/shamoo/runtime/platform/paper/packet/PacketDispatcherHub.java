@@ -6,27 +6,30 @@ import dev.shamoo.runtime.core.ResourceRegistry;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Stable runtime packet dispatcher with policy-checked, owner-scoped subscriptions. */
+@SuppressWarnings("PMD.CompareObjectsWithEquals")
 public final class PacketDispatcherHub implements PaperPacketBridge.PacketDispatcher {
     private final PacketAccessPolicy policy;
     private final ResourceRegistry resources;
-    private final java.util.List<PaperPacketBridge.PacketDispatcher> subscribers = new CopyOnWriteArrayList<>();
+    private volatile PaperPacketBridge.PacketDispatcher[] subscribers = {};
 
     public PacketDispatcherHub(PacketAccessPolicy policy, ResourceRegistry resources) {
         this.policy = Objects.requireNonNull(policy, "policy");
         this.resources = Objects.requireNonNull(resources, "resources");
     }
 
-    public AutoCloseable subscribe(PluginId owner, PaperPacketBridge.PacketDispatcher dispatcher) {
+    public synchronized AutoCloseable subscribe(PluginId owner, PaperPacketBridge.PacketDispatcher dispatcher) {
         policy.require(owner);
-        subscribers.add(Objects.requireNonNull(dispatcher, "dispatcher"));
+        PaperPacketBridge.PacketDispatcher value = Objects.requireNonNull(dispatcher, "dispatcher");
+        PaperPacketBridge.PacketDispatcher[] updated = java.util.Arrays.copyOf(subscribers, subscribers.length + 1);
+        updated[updated.length - 1] = value;
+        subscribers = updated;
         AtomicBoolean closed = new AtomicBoolean();
         return resources.register(owner, ResourceCategory.LISTENER, "Paper packet dispatcher", () -> {
             if (closed.compareAndSet(false, true)) {
-                subscribers.remove(dispatcher);
+                remove(value);
             }
         });
     }
@@ -34,8 +37,22 @@ public final class PacketDispatcherHub implements PaperPacketBridge.PacketDispat
     @Override
     public CompletionStage<PaperPacketBridge.Decision> dispatch(PaperPacketBridge.PacketContext packet) {
         CompletableFuture<PaperPacketBridge.Decision> result = new CompletableFuture<>();
-        dispatchAt(packet, subscribers.toArray(PaperPacketBridge.PacketDispatcher[]::new), 0, result);
+        dispatchAt(packet, subscribers, 0, result);
         return result;
+    }
+
+    private synchronized void remove(PaperPacketBridge.PacketDispatcher dispatcher) {
+        PaperPacketBridge.PacketDispatcher[] current = subscribers;
+        for (int index = 0; index < current.length; index++) {
+            if (current[index] == dispatcher) {
+                PaperPacketBridge.PacketDispatcher[] updated =
+                        new PaperPacketBridge.PacketDispatcher[current.length - 1];
+                System.arraycopy(current, 0, updated, 0, index);
+                System.arraycopy(current, index + 1, updated, index, current.length - index - 1);
+                subscribers = updated;
+                return;
+            }
+        }
     }
 
     private static void dispatchAt(PaperPacketBridge.PacketContext packet,

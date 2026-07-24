@@ -87,6 +87,34 @@ class ShamooNodeRuntimeTest {
             assertEquals("undefined", runtime.evaluate("typeof MessageChannel", "callback.js").join());
             assertEquals("undefined", runtime.evaluate("typeof MessageEvent", "callback.js").join());
             assertEquals("undefined", runtime.evaluate("typeof MessagePort", "callback.js").join());
+            assertEquals("undefined", runtime.evaluate("typeof Worker", "callback.js").join());
+            assertEquals("undefined", runtime.evaluate("typeof Java", "callback.js").join());
+            assertEquals("undefined", runtime.evaluate("typeof Packages", "callback.js").join());
+            assertEquals(null, runtime.evaluate("Object.getPrototypeOf(host)", "callback.js").join());
+            assertHostBoundaryFailure(runtime, "delete globalThis.host");
+            assertHostBoundaryFailure(runtime, "globalThis.host = {}");
+            assertEquals("function", runtime.evaluate("typeof host.add", "callback.js").join());
+        }
+    }
+
+    @Test
+    void rejectsJavaClassProxyAndRuntimeObjectsAcrossHostBoundary() {
+        ClassLoader loader = Thread.currentThread().getContextClassLoader();
+        Runnable proxy = (Runnable) java.lang.reflect.Proxy.newProxyInstance(loader,
+                new Class<?>[] {Runnable.class}, (instance, method, arguments) -> null);
+        try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(
+                new PluginId("java-boundary"), pluginRoot, policy(List.of(), List.of(), List.of()),
+                Map.of("javaClass", arguments -> String.class,
+                        "classLoader", arguments -> loader,
+                        "reflectionMember", arguments -> String.class.getMethod("length"),
+                        "javaProxy", arguments -> proxy,
+                        "javetArgument", arguments -> arguments.getFirst()),
+                ShamooNodeRuntimeOptions.DEFAULT, error -> { })) {
+            assertHostBoundaryFailure(runtime, "host.javaClass()");
+            assertHostBoundaryFailure(runtime, "host.classLoader()");
+            assertHostBoundaryFailure(runtime, "host.reflectionMember()");
+            assertHostBoundaryFailure(runtime, "host.javaProxy()");
+            assertHostBoundaryFailure(runtime, "host.javetArgument(() => 1)");
         }
     }
 
@@ -160,6 +188,16 @@ class ShamooNodeRuntimeTest {
             runtime.evaluate("Promise.reject(new Error('rejected')); 'reported'", "rejection.js").join();
             assertTrue(errors.stream().anyMatch(error -> error.getMessage().contains("rejected")));
             assertTrue(runtime.metrics().unhandledErrors() >= 1);
+        }
+    }
+
+    @Test
+    void adaptsAsynchronousHostResultsToIsolateOwnedPromises() {
+        try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(
+                new PluginId("host-promises"), pluginRoot, policy(List.of(), List.of(), List.of()),
+                Map.of("later", arguments -> CompletableFuture.supplyAsync(() -> 42)),
+                ShamooNodeRuntimeOptions.DEFAULT, error -> { })) {
+            assertEquals(43, runtime.evaluate("host.later().then(value => value + 1)", "host-promise.js").join());
         }
     }
 
@@ -380,6 +418,50 @@ class ShamooNodeRuntimeTest {
                 () -> runtime.executeModule("fs.cjs").join());
             assertInstanceOf(RuntimePermissionError.class, denied.getCause());
             assertEquals("undefined", runtime.evaluate("typeof fetch", "network.js").join());
+            for (String alias : List.of("node:fs/promises", "fs/promises")) {
+                String name = alias.replace(':', '-').replace('/', '-') + ".cjs";
+                runtime.registerModule(name, "module.exports = require('" + alias + "');",
+                        ModuleKind.COMMON_JS).join();
+                CompletionException aliasDenied = assertThrows(CompletionException.class,
+                        () -> runtime.executeModule(name).join());
+                assertInstanceOf(RuntimePermissionError.class, aliasDenied.getCause());
+            }
+        }
+    }
+
+    @Test
+    void requestedNativeCapabilitiesCannotEscapeControlledBoundaries() {
+        NodePolicy requested = new NodePolicy(List.of("node:child_process", "node:worker_threads", "node:module"),
+                new FilesystemPolicy(List.of(), List.of()), true, true, true, true);
+        try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(
+                new PluginId("native-escapes"), pluginRoot, requested)) {
+            for (String builtin : List.of("node:child_process", "child_process", "node:worker_threads",
+                    "worker_threads", "node:module", "module", "node:net", "node:http", "node:fs",
+                    "fs/promises")) {
+                String moduleName = builtin.replace(':', '-').replace('/', '-') + ".cjs";
+                runtime.registerModule(moduleName,
+                        "module.exports = require('" + builtin + "');", ModuleKind.COMMON_JS).join();
+                CompletionException denied = assertThrows(CompletionException.class,
+                        () -> runtime.executeModule(moduleName).join());
+                assertInstanceOf(RuntimePermissionError.class, denied.getCause());
+            }
+            runtime.registerModule("package.mjs", "import value from 'untrusted-package'; export default value;",
+                    ModuleKind.ESM).join();
+            CompletionException packageDenied = assertThrows(CompletionException.class,
+                    () -> runtime.executeModule("package.mjs").join());
+            assertInstanceOf(RuntimeModuleResolutionError.class, packageDenied.getCause());
+            runtime.registerModule("url.mjs", "import 'data:text/javascript,export default 1';",
+                    ModuleKind.ESM).join();
+            CompletionException urlDenied = assertThrows(CompletionException.class,
+                    () -> runtime.executeModule("url.mjs").join());
+            assertInstanceOf(RuntimeModuleResolutionError.class, urlDenied.getCause());
+            runtime.registerModule("addon.cjs", "module.exports = require('./escape.node');",
+                    ModuleKind.COMMON_JS).join();
+            CompletionException addonDenied = assertThrows(CompletionException.class,
+                    () -> runtime.executeModule("addon.cjs").join());
+            assertInstanceOf(RuntimeModuleResolutionError.class, addonDenied.getCause());
+            assertEquals("undefined:undefined:undefined", runtime.evaluate(
+                    "typeof process + ':' + typeof fetch + ':' + typeof Worker", "globals.js").join());
         }
     }
 
@@ -546,6 +628,12 @@ class ShamooNodeRuntimeTest {
             Map<String, HostFunction> bindings) {
         return manager.create(
             new PluginId(id), pluginRoot, policy, bindings, ShamooNodeRuntimeOptions.DEFAULT, error -> { });
+    }
+
+    private static void assertHostBoundaryFailure(ShamooNodeRuntime runtime, String source) {
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> runtime.evaluate(source, "host-boundary.js").join());
+        assertInstanceOf(RuntimeEvaluationError.class, failure.getCause());
     }
 
     private static NodePolicy policy(List<String> builtins, List<String> read, List<String> write) {

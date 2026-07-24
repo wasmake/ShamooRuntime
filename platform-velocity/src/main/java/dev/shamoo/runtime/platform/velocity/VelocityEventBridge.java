@@ -61,13 +61,14 @@ public final class VelocityEventBridge {
         @Override
         public EventTask executeAsync(E event) {
             AsyncEventDispatcher<E> current = dispatcher.get();
-            CompletableFuture<Void> completion = new CompletableFuture<>();
+            CompletableFuture<Void> completion;
             if (current == null) {
-                completion.complete(null);
+                completion = CompletableFuture.completedFuture(null);
             } else {
                 CompletionStage<Void> stage = current.dispatch(event);
                 if (stage == null) {
-                    completion.completeExceptionally(new IllegalStateException("event dispatcher returned null"));
+                    completion = CompletableFuture.failedFuture(
+                            new IllegalStateException("event dispatcher returned null"));
                 } else {
                     completion = adapt(stage);
                 }
@@ -76,6 +77,9 @@ public final class VelocityEventBridge {
         }
 
         static CompletableFuture<Void> adapt(CompletionStage<Void> stage) {
+            if (stage instanceof CompletableFuture<Void> future) {
+                return future;
+            }
             CompletableFuture<Void> result = new CompletableFuture<>();
             stage.whenComplete((ignored, failure) -> {
                 if (failure == null) {

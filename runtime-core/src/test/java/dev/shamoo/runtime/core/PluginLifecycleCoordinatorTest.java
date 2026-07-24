@@ -1,6 +1,7 @@
 package dev.shamoo.runtime.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import dev.shamoo.runtime.protocol.ManifestCodec;
 import org.junit.jupiter.api.Test;
 
 @SuppressWarnings({
@@ -29,7 +31,8 @@ import org.junit.jupiter.api.Test;
     "PMD.TestClassWithoutTestCases",
     "PMD.AvoidFieldNameMatchingMethodName",
     "PMD.AvoidDuplicateLiterals",
-    "PMD.AssignmentInOperand"
+    "PMD.AssignmentInOperand",
+    "PMD.LiteralsFirstInComparisons"
 })
 class PluginLifecycleCoordinatorTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(2);
@@ -297,6 +300,152 @@ class PluginLifecycleCoordinatorTest {
                 });
     }
 
+    @Test
+    void failedCandidatePreservesReadyActiveRuntime() {
+        TestRuntime active = new TestRuntime();
+        TestRuntime candidate = new TestRuntime();
+        candidate.readyHook = failed("candidate ready");
+        PluginLifecycleCoordinator coordinator = coordinator(context -> CompletableFuture.completedFuture(
+                context.candidate().descriptor().version().value().equals("1.0.0") ? active : candidate));
+        PluginId id = installOne(coordinator);
+        coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
+
+        CompletionException failure = assertThrows(CompletionException.class, () -> coordinator.replace(
+                TestCandidates.candidate("plugin", "2.0.0", TestCandidates.emptyDependencies()),
+                UUID.randomUUID()).toCompletableFuture().join());
+
+        assertInstanceOf(PluginReadyError.class, failure.getCause());
+        assertEquals(PluginLifecycleState.READY, coordinator.snapshot(id).state());
+        assertFalse(active.events.contains("plugin:drain"));
+        assertFalse(active.events.contains("plugin:disable"));
+        assertEquals(List.of("plugin:load", "plugin:enable", "plugin:ready", "plugin:unload"), candidate.events);
+        InvocationAdmission.Lease lease = coordinator.admitInvocation(id);
+        assertTrue(coordinator.snapshot(id).invocations().accepting());
+        lease.close();
+    }
+
+    @Test
+    void migratesHotStateBeforeDrainingAndAtomicallyAdmitsReplacement() {
+        List<String> events = java.util.Collections.synchronizedList(new ArrayList<>());
+        StatefulRuntime active = new StatefulRuntime(events, "old", new byte[] {1, 2, 3});
+        StatefulRuntime candidate = new StatefulRuntime(events, "new", new byte[0]);
+        PluginLifecycleCoordinator coordinator = coordinator(context -> CompletableFuture.completedFuture(
+                context.candidate().descriptor().version().value().equals("1.0.0") ? active : candidate));
+        PluginId id = installOne(coordinator);
+        coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
+
+        coordinator.replace(preserveStateCandidate("plugin", "2.0.0"), UUID.randomUUID())
+                .toCompletableFuture().join();
+
+        assertArrayEquals(new byte[] {1, 2, 3}, candidate.state);
+        assertTrue(events.indexOf("old:export") < events.indexOf("new:import"));
+        assertTrue(events.indexOf("new:import") < events.indexOf("old:drain"));
+        assertTrue(events.indexOf("old:drain") < events.indexOf("old:unload"));
+        assertEquals(PluginLifecycleState.READY, coordinator.snapshot(id).state());
+        InvocationAdmission.Lease lease = coordinator.admitInvocation(id);
+        assertTrue(coordinator.snapshot(id).invocations().accepting());
+        lease.close();
+    }
+
+    @Test
+    void failedStateImportPreservesActiveRuntimeAndAdmission() {
+        List<String> events = java.util.Collections.synchronizedList(new ArrayList<>());
+        StatefulRuntime active = new StatefulRuntime(events, "old", new byte[] {4, 5, 6});
+        StatefulRuntime candidate = new StatefulRuntime(events, "new", new byte[0]);
+        candidate.failImport = true;
+        PluginLifecycleCoordinator coordinator = coordinator(context -> CompletableFuture.completedFuture(
+                "1.0.0".equals(context.candidate().descriptor().version().value()) ? active : candidate));
+        PluginId id = installOne(coordinator);
+        coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
+
+        assertThrows(CompletionException.class, () -> coordinator.replace(
+                preserveStateCandidate("plugin", "2.0.0"), UUID.randomUUID()).toCompletableFuture().join());
+
+        assertEquals(PluginLifecycleState.READY, coordinator.snapshot(id).state());
+        assertFalse(events.contains("old:drain"));
+        assertTrue(events.contains("new:unload"));
+        InvocationAdmission.Lease lease = coordinator.admitInvocation(id);
+        lease.close();
+    }
+
+    @Test
+    void reportsRetiredRuntimeResourceLeakWithoutRollingBackSuccessfulSwap() {
+        ResourceRegistry resources = new ResourceRegistry();
+        TestRuntime active = new TestRuntime();
+        TestRuntime candidate = new TestRuntime();
+        PluginLifecycleCoordinator coordinator = new PluginLifecycleCoordinator(context -> {
+            if (context.candidate().descriptor().version().value().equals("1.0.0")) {
+                context.resources().register(context.candidate().pluginId(), ResourceCategory.SERVICE,
+                        "old generation", () -> {
+                            throw new IllegalStateException("leaked");
+                        });
+                return CompletableFuture.completedFuture(active);
+            }
+            return CompletableFuture.completedFuture(candidate);
+        }, resources, TIMEOUT, TIMEOUT, QuarantinePolicy.DEFAULT, executor);
+        PluginId id = installOne(coordinator);
+        coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
+
+        CompletionException failure = assertThrows(CompletionException.class, () -> coordinator.replace(
+                TestCandidates.candidate("plugin", "2.0.0", TestCandidates.emptyDependencies()),
+                UUID.randomUUID()).toCompletableFuture().join());
+
+        assertInstanceOf(ResourceCleanupError.class, failure.getCause());
+        assertEquals(PluginLifecycleState.READY, coordinator.snapshot(id).state());
+        assertEquals("old generation", coordinator.snapshot(id).resources().getFirst().description());
+        InvocationAdmission.Lease lease = coordinator.admitInvocation(id);
+        assertTrue(candidate.events.contains("plugin:ready"));
+        lease.close();
+    }
+
+    @Test
+    void stagesCandidateBeforeReplacement() {
+        TestRuntime active = new TestRuntime();
+        TestRuntime candidate = new TestRuntime();
+        PluginLifecycleCoordinator coordinator = coordinator(context -> CompletableFuture.completedFuture(
+                context.candidate().descriptor().version().value().equals("1.0.0") ? active : candidate));
+        installOne(coordinator);
+        coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
+        java.nio.file.Path source = java.nio.file.Path.of("source");
+        java.nio.file.Path staging = java.nio.file.Path.of("staging");
+        AtomicBoolean staged = new AtomicBoolean();
+
+        coordinator.stageAndReplace(source, staging, (actualSource, actualStaging) -> {
+            assertEquals(source, actualSource);
+            assertEquals(staging, actualStaging);
+            staged.set(true);
+            return TestCandidates.candidate("plugin", "2.0.0", TestCandidates.emptyDependencies());
+        }, UUID.randomUUID()).toCompletableFuture().join();
+
+        assertTrue(staged.get());
+        assertTrue(candidate.events.contains("plugin:ready"));
+    }
+
+    @Test
+    void rejectsReplacementThatWouldBlockAnActiveDependent() {
+        Map<String, TestRuntime> runtimes = new java.util.HashMap<>();
+        PluginLifecycleCoordinator coordinator = coordinator(context -> CompletableFuture.completedFuture(
+                runtimes.computeIfAbsent(context.candidate().pluginId() + "-"
+                        + context.candidate().descriptor().version().value(), ignored -> new TestRuntime())));
+        InstalledPluginCandidate base = TestCandidates.candidate("base");
+        InstalledPluginCandidate dependent = TestCandidates.candidate("dependent", "1.0.0", """
+                {"required":{"base":"^1.0.0"},"optional":{},"loadBefore":[],"loadAfter":[]}
+                """);
+        coordinator.install(List.of(base, dependent));
+        coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
+
+        assertThrows(CompletionException.class, () -> coordinator.replace(
+                TestCandidates.candidate("base", "2.0.0", TestCandidates.emptyDependencies()),
+                UUID.randomUUID()).toCompletableFuture().join());
+
+        assertEquals(PluginLifecycleState.READY, coordinator.snapshot(base.pluginId()).state());
+        assertEquals(PluginLifecycleState.READY, coordinator.snapshot(dependent.pluginId()).state());
+        InvocationAdmission.Lease baseLease = coordinator.admitInvocation(base.pluginId());
+        InvocationAdmission.Lease dependentLease = coordinator.admitInvocation(dependent.pluginId());
+        baseLease.close();
+        dependentLease.close();
+    }
+
     private void assertHookFailure(
             PluginLifecycleState expected,
             java.util.function.Consumer<TestRuntime> configure,
@@ -311,6 +460,16 @@ class PluginLifecycleCoordinatorTest {
 
     private static Supplier<CompletableFuture<Void>> failed(String phase) {
         return () -> CompletableFuture.failedFuture(new IllegalStateException(phase));
+    }
+
+    private static InstalledPluginCandidate preserveStateCandidate(String id, String version) {
+        InstalledPluginCandidate candidate = TestCandidates.candidate(
+                id, version, TestCandidates.emptyDependencies());
+        ManifestCodec codec = new ManifestCodec();
+        String manifest = codec.serialize(candidate.descriptor())
+                .replace("\"preserveState\":false", "\"preserveState\":true");
+        return new InstalledPluginCandidate(candidate.pluginId(), codec.parse(manifest),
+                candidate.root(), candidate.checksums());
     }
 
     private PluginLifecycleCoordinator coordinator(PluginRuntimeFactory factory) {
@@ -351,9 +510,9 @@ class PluginLifecycleCoordinatorTest {
         }
     }
 
-    private static final class TestRuntime implements PluginRuntime {
-        private final List<String> events;
-        private final String name;
+    private static class TestRuntime implements PluginRuntime {
+        protected final List<String> events;
+        protected final String name;
         private Supplier<CompletableFuture<Void>> load = () -> CompletableFuture.completedFuture(null);
         private Supplier<CompletableFuture<Void>> enableHook = () -> CompletableFuture.completedFuture(null);
         private Supplier<CompletableFuture<Void>> readyHook = () -> CompletableFuture.completedFuture(null);
@@ -403,6 +562,32 @@ class PluginLifecycleCoordinatorTest {
         public CompletableFuture<Void> unload() {
             events.add(name + ":unload");
             return unloadHook.get();
+        }
+    }
+
+    private static final class StatefulRuntime extends TestRuntime implements HotStatePluginRuntime {
+        private byte[] state;
+        private boolean failImport;
+
+        private StatefulRuntime(List<String> events, String name, byte[] state) {
+            super(events, name);
+            this.state = state.clone();
+        }
+
+        @Override
+        public CompletionStage<byte[]> exportHotState() {
+            events.add(name + ":export");
+            return CompletableFuture.completedFuture(state.clone());
+        }
+
+        @Override
+        public CompletionStage<Void> importHotState(byte[] imported) {
+            events.add(name + ":import");
+            if (failImport) {
+                return CompletableFuture.failedFuture(new IllegalStateException("state import failed"));
+            }
+            state = imported.clone();
+            return CompletableFuture.completedFuture(null);
         }
     }
 }

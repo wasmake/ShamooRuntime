@@ -48,7 +48,7 @@
       "additionalProperties": false,
       "required": ["builtins", "filesystem", "network", "workers", "childProcess", "nativeAddons"],
       "properties": {
-        "builtins": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^(node:)?[a-z][a-z0-9_/-]*$" } },
+        "builtins": { "type": "array", "maxItems": 256, "uniqueItems": true, "items": { "type": "string", "maxLength": 256, "pattern": "^(node:)?[a-z][a-z0-9_/-]*$" } },
         "filesystem": {
           "type": "object",
           "additionalProperties": false,
@@ -76,15 +76,15 @@
     }
   },
   "$defs": {
-    "nonWhitespace": { "type": "string", "pattern": "^[\\s\\S]*[^\\s][\\s\\S]*$" },
+    "nonWhitespace": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[\\s\\S]*[^\\s][\\s\\S]*$" },
     "semver": {
       "type": "string",
       "format": "semver",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
     },
-    "semverRange": { "type": "string", "format": "semver-range", "pattern": "^[\\s\\S]*[^\\s][\\s\\S]*$" },
+    "semverRange": { "type": "string", "minLength": 1, "maxLength": 256, "format": "semver-range", "pattern": "^[\\s\\S]*[^\\s][\\s\\S]*$" },
     "pluginId": { "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9]*([._-][a-z0-9]+)*$" },
-    "entrypoint": { "type": "string", "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*\\u0000)(?!\\.$)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:/)\\.(?:/|$))(?!.*//)(?:\\./)?[^/]+(?:/[^/]+)*\\.(?:js|mjs|cjs)$" },
+    "entrypoint": { "type": "string", "maxLength": 512, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*\\u0000)(?!\\.$)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:/)\\.(?:/|$))(?!.*//)(?:\\./)?[^/]+(?:/[^/]+)*\\.(?:js|mjs|cjs)$" },
     "relativePath": {
       "anyOf": [
         { "const": "./" },
