@@ -39,10 +39,27 @@ fun registerApiTask(name: String, platform: String, apiVersion: String, mapping:
         argumentProviders.add(CommandLineArgumentProvider { artifactPaths.get() })
     }
 
+fun registerApiVerification(name: String, platform: String, artifacts: Configuration) =
+        tasks.register<JavaExec>(name) {
+    val artifactPaths = artifacts.incoming.artifacts.resolvedArtifacts.map { resolved ->
+        resolved.map { it.file.absolutePath }.sorted()
+    }
+    group = "verification"
+    description = "Independently rescan and verify complete generated $platform API coverage"
+    dependsOn(tasks.classes)
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("dev.shamoo.runtime.codegen.ApiCoverageVerifierCli")
+    args(platform, layout.projectDirectory.file("generated/$platform/model.json").asFile.absolutePath,
+        layout.projectDirectory.file("generated/$platform/coverage.json").asFile.absolutePath)
+    argumentProviders.add(CommandLineArgumentProvider { artifactPaths.get() })
+}
+
 val generatePaperApi = registerApiTask("generatePaperApi", "paper", paperVersion,
     "paper-api+adventure", paperApi)
 val generateVelocityApi = registerApiTask("generateVelocityApi", "velocity", velocityVersion,
     "velocity-api+adventure", velocityApi)
+val verifyPaperApiCoverage = registerApiVerification("verifyPaperApiCoverage", "paper", paperApi)
+val verifyVelocityApiCoverage = registerApiVerification("verifyVelocityApiCoverage", "velocity", velocityApi)
 
 val generatedSnapshot = layout.buildDirectory.dir("verification/platform-api-snapshot")
 val snapshotPlatformApis = tasks.register<Sync>("snapshotPlatformApis") {
@@ -55,6 +72,12 @@ generateVelocityApi.configure { mustRunAfter(snapshotPlatformApis) }
 tasks.register("generatePlatformApis") {
     group = "code generation"
     dependsOn(generatePaperApi, generateVelocityApi)
+}
+
+tasks.register("verifyPlatformApiCoverage") {
+    group = "verification"
+    description = "Verify Paper and Velocity generated API coverage independently"
+    dependsOn(verifyPaperApiCoverage, verifyVelocityApiCoverage)
 }
 
 tasks.register("syncPlatformApis") {
