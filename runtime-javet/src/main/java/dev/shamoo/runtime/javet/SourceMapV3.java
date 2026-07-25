@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -153,9 +154,8 @@ final class SourceMapV3 {
         }
 
         CompletionStage<Void> register(ShamooNodeRuntime runtime) {
-            List<CompletableFuture<Void>> registrations = mappings.stream()
-                    .map(mapping -> runtime.registerSourceMap(mapping.generated(), mapping.original())).toList();
-            return CompletableFuture.allOf(registrations.toArray(CompletableFuture[]::new));
+            return runtime.registerSourceMaps(mappings.stream()
+                    .map(mapping -> Map.entry(mapping.generated(), mapping.original())).toList());
         }
     }
 }

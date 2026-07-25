@@ -228,12 +228,22 @@ public final class ShamooNodeRuntime implements AutoCloseable {
     }
 
     public CompletableFuture<Void> registerSourceMap(SourcePosition generated, SourcePosition original) {
-        Objects.requireNonNull(generated, "generated");
-        Objects.requireNonNull(original, "original");
-        SourcePosition canonicalGenerated = new SourcePosition(
-            canonicalModuleName(generated.resourceName()), generated.line(), generated.column());
+        return registerSourceMaps(List.of(Map.entry(generated, original)));
+    }
+
+    CompletableFuture<Void> registerSourceMaps(List<Map.Entry<SourcePosition, SourcePosition>> mappings) {
+        Objects.requireNonNull(mappings, "mappings");
+        if (mappings.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        List<Map.Entry<SourcePosition, SourcePosition>> canonicalMappings = mappings.stream().map(mapping -> {
+            SourcePosition generated = Objects.requireNonNull(mapping.getKey(), "generated");
+            SourcePosition original = Objects.requireNonNull(mapping.getValue(), "original");
+            return Map.entry(new SourcePosition(canonicalModuleName(generated.resourceName()),
+                    generated.line(), generated.column()), original);
+        }).toList();
         return submit(() -> {
-            sourceMaps.register(canonicalGenerated, original);
+            canonicalMappings.forEach(mapping -> sourceMaps.register(mapping.getKey(), mapping.getValue()));
             return null;
         });
     }
