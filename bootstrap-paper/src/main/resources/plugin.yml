@@ -5,3 +5,4 @@ api-version: '1.21'
 description: JavaScript runtime foundation for Paper
 authors: [ShamooRuntime contributors]
 folia-supported: true
+softdepend: [MiniPlaceholders]

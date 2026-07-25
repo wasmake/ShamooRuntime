@@ -288,6 +288,15 @@ public final class ShamooNodeRuntime implements AutoCloseable {
         });
     }
 
+    /** Releases one retained JS callback on the isolate owner thread. */
+    public CompletableFuture<Boolean> unregisterCallback(String name) {
+        Objects.requireNonNull(name, "name");
+        return submit(() -> {
+            assertOwnerThread();
+            return javaProxyRegistry.unregisterCallback(name);
+        });
+    }
+
     public CompletableFuture<String> readTextFile(String relativePath) {
         return submit(() -> readSecureFile(
             policyRelativePath(relativePath, permissions.readablePaths(), "read"), relativePath));

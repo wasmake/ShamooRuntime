@@ -51,7 +51,7 @@ platform-specific artifact.
 | `runtime-core` | Discovery, dependency graph, lifecycle coordination, resources, and host contracts |
 | `runtime-javet` | Per-plugin Javet Node implementation, policy boundary, event loop, and native lifecycle |
 | `runtime-codegen-support` | Binding annotations and generated metadata validation |
-| `platform-paper` | Paper events, commands, Folia schedulers, messaging, Adventure, and opt-in packets |
+| `platform-paper` | Paper events, parsed command routes, rich text, protected UI/items, Folia schedulers, messaging, and opt-in packets |
 | `platform-paper-nms` | Exact Paper 1.21.8 mapped connection and packet integration |
 | `platform-velocity` | Velocity continuation events, commands, scheduler, messaging, routing, and Adventure |
 | `bootstrap-paper` | Paper plugin entry point artifact |

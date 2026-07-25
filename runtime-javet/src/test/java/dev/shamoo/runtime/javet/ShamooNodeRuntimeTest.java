@@ -202,6 +202,26 @@ class ShamooNodeRuntimeTest {
     }
 
     @Test
+    void unregistersRetainedCallbacksOnTheIsolateOwnerThread() {
+        try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(
+                new PluginId("callback-cleanup"), pluginRoot, policy(List.of(), List.of(), List.of()))) {
+            runtime.evaluate("host.registerCallback('temporary', () => 42)", "callback.js").join();
+            assertEquals(3, runtime.metrics().registeredJavaCallbacks());
+            assertEquals(true, runtime.evaluate(
+                    "host.unregisterCallback('temporary')", "callback-unregister.js").join());
+            assertEquals(2, runtime.metrics().registeredJavaCallbacks());
+            assertFalse(runtime.unregisterCallback("temporary").join());
+
+            runtime.evaluate("host.registerCallback('java-side', () => 7)", "callback-java.js").join();
+            assertTrue(runtime.unregisterCallback("java-side").join());
+
+            CompletionException failure = assertThrows(CompletionException.class,
+                    () -> runtime.invokeCallback("temporary", List.of()).join());
+            assertInstanceOf(IllegalArgumentException.class, failure.getCause());
+        }
+    }
+
+    @Test
     void commonJsDrivesPromisesTimersAndReportsUnhandledFailures() {
         List<RuntimeUnhandledError> errors = new ArrayList<>();
         try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(

@@ -25,15 +25,27 @@ live event and must complete synchronously in the originating event frame; cance
 therefore remain native Bukkit state. Closing unregisters the listener.
 
 `PaperCommandBridge` selects the command-map capability because the pinned lifecycle registrar has no supported
-immediate unregister operation. Close removes primary, alias, and namespaced labels synchronously. `PaperSchedulerBridge` uses Paper's
+immediate unregister operation. It aggregates compiler-authorized methods under one owner/root, parses literals,
+required/optional/greedy arguments and options, applies typed parsers, permissions, sender restrictions, descriptions,
+and completion sources, then passes only copied argument/option/sender data to the selected callback. Closing a route
+removes only that route; closing the final route removes primary, alias, and namespaced labels synchronously.
+`PaperSchedulerBridge` uses Paper's
 async, global, region, and entity schedulers and exposes current-region ownership checks. Every listener, command,
 task, and messaging channel is registered in `ResourceRegistry`. `PaperAudienceBridge` passes native Adventure
 audiences without serialization.
 
+`PaperRichTextRenderer` validates plain component, MiniMessage, optional MiniPlaceholders, and legacy descriptors before
+creating JVM-owned Adventure components. Click callbacks have bounded uses and lifetimes and receive a fresh temporary
+data-only sender context. `PaperUiBridge` creates protected inventories and item stacks on the JVM, stores only opaque
+action identifiers in persistent item data, cancels configured click/drag/interact behavior, and closes viewers and
+callback mappings with the owning generation. Command/action sender tokens exist only while their script completion is
+active; no `CommandSender`, `Player`, `Component`, `Inventory`, or `ItemStack` crosses into JavaScript.
+
 Bootstraps publish only named platform operations into Javet. Every invocation requires generated namespace/type and
 protocol metadata, binds ownership to the calling plugin, and registers listeners, commands, tasks, channels, and packet
 subscriptions in `ResourceRegistry`; server, proxy, registrar, scheduler, and packet registry objects are never exposed.
-Script dispatchers are explicit registered callback names. Paper event callbacks are synchronously joined in the
+Script dispatchers are explicit registered callback names. Nested text/UI callback markers are recursively adapted
+only inside an exactly authorized generated operation. Paper event callbacks are synchronously joined in the
 native event frame, scheduled work uses Paper/Folia schedulers, and Velocity event callbacks return the native
 continuation stage. Only copied scalar/list/map/byte carriers cross the isolate boundary. Paper proxy requests select
 an eligible online player automatically rather than exposing a `Player` carrier to JS.

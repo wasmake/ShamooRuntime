@@ -33,6 +33,7 @@ public final class JavaProxyRegistry implements AutoCloseable {
         hostObject = runtime.createV8ValueObject();
         runtime.getGlobalObject().set("host", hostObject);
         registerCallbackOperation();
+        unregisterCallbackOperation();
     }
 
     public synchronized void register(String name, HostFunction hostFunction) throws JavetException {
@@ -120,12 +121,7 @@ public final class JavaProxyRegistry implements AutoCloseable {
             if (name == null || !name.matches("[A-Za-z_$][A-Za-z0-9_$./#-]*")) {
                 throw new IllegalArgumentException("invalid callback name: " + name);
             }
-            V8ValueFunction retained = function.toClone(true);
-            V8ValueFunction previous = callbacks.putIfAbsent(name, retained);
-            if (previous != null) {
-                retained.close();
-                throw new IllegalArgumentException("callback already registered: " + name);
-            }
+            registerCallback(name, function);
             return runtime.createV8ValueBoolean(true);
         };
         JavetCallbackContext context = new JavetCallbackContext(
@@ -133,6 +129,42 @@ public final class JavaProxyRegistry implements AutoCloseable {
         V8ValueFunction function = runtime.createV8ValueFunction(context);
         functions.put("registerCallback", new RegisteredFunction(function, context));
         hostObject.set("registerCallback", function);
+    }
+
+    private void unregisterCallbackOperation() throws JavetException {
+        IJavetDirectCallable.NoThisAndResult<Exception> callback = arguments -> {
+            if (arguments == null || arguments.length != 1 || !(arguments[0] instanceof V8Value)) {
+                throw new IllegalArgumentException("unregisterCallback requires an exact callback name");
+            }
+            String name = arguments[0].asString();
+            if (name == null || !name.matches("[A-Za-z_$][A-Za-z0-9_$./#-]*")) {
+                throw new IllegalArgumentException("invalid callback name: " + name);
+            }
+            return runtime.createV8ValueBoolean(unregisterCallback(name));
+        };
+        JavetCallbackContext context = new JavetCallbackContext(
+                "unregisterCallback", JavetCallbackType.DirectCallNoThisAndResult, callback);
+        V8ValueFunction function = runtime.createV8ValueFunction(context);
+        functions.put("unregisterCallback", new RegisteredFunction(function, context));
+        hostObject.set("unregisterCallback", function);
+    }
+
+    private synchronized void registerCallback(String name, V8ValueFunction function) throws JavetException {
+        V8ValueFunction retained = function.toClone(true);
+        V8ValueFunction previous = callbacks.putIfAbsent(name, retained);
+        if (previous != null) {
+            retained.close();
+            throw new IllegalArgumentException("callback already registered: " + name);
+        }
+    }
+
+    synchronized boolean unregisterCallback(String name) throws JavetException {
+        V8ValueFunction callback = callbacks.remove(name);
+        if (callback == null) {
+            return false;
+        }
+        callback.close();
+        return true;
     }
 
     private static Object requireDataValue(Object value, String boundary, Map<Object, Boolean> visited) {
