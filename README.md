@@ -2,14 +2,15 @@
 
 ShamooRuntime is a Java 21 foundation for embedding a JavaScript runtime in Paper and Velocity plugins. The runtime
 defines module and lifecycle boundaries, separately packaged platform adapters, the plugin manifest protocol, and a
-production plugin lifecycle host. Manifest v1 provides strict JSON decoding, immutable policy models,
+production plugin lifecycle host. The three-file artifact and manifest v2 provide strict JSON decoding, embedded
+compiler metadata, immutable policy models,
 semantic-version negotiation, and admission validation. Secure discovery, deterministic dependency ordering,
 serialized hooks, invocation draining, quarantine, and typed resource ownership coordinate each confined plugin Node
 isolate without exposing Javet through core APIs. Phases 7 and 8 add generated stable platform surfaces, owned Paper
 and Velocity adapters, a separately versioned opt-in Paper packet boundary, and Phase 10 generation-safe cross-plugin
 contracts with optional Paper to Velocity messaging.
 Phases 9 through 12 add watched transactional installation, generation-keyed Javet runtimes, lifecycle and hot-state
-entrypoint hooks, data-only JS service/event/platform callbacks, and attested release-candidate automation.
+hooks from fixed ESM bundles, data-only JS service/event/platform callbacks, and attested release-candidate automation.
 
 ## Requirements
 

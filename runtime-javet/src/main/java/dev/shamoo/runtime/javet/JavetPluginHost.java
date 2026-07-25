@@ -14,6 +14,7 @@ import dev.shamoo.runtime.protocol.CompatibilityInput;
 import dev.shamoo.runtime.protocol.CompatibilityNegotiator;
 import dev.shamoo.runtime.protocol.CompatibilityResult;
 import dev.shamoo.runtime.protocol.ManifestCodec;
+import dev.shamoo.runtime.protocol.PluginArtifactProtocol;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,6 +48,7 @@ public final class JavetPluginHost implements AutoCloseable {
     });
     private final Map<PluginId, InstalledPluginCandidate> candidates = new LinkedHashMap<>();
     private final Map<Path, PluginId> sourceIdentities = new LinkedHashMap<>();
+    private final Map<Path, SourceMapV3.ValidatedSourceMap> sourceMaps = new java.util.concurrent.ConcurrentHashMap<>();
     private final Set<PluginId> rejectedCandidates = new java.util.LinkedHashSet<>();
     private final System.Logger logger;
     private PluginDirectoryWatcher watcher;
@@ -72,7 +74,9 @@ public final class JavetPluginHost implements AutoCloseable {
                 runtimeManager, ShamooNodeRuntimeOptions.DEFAULT, bindings,
                 context -> error -> logger.log(System.Logger.Level.ERROR,
                         "Unhandled plugin runtime error for " + context.candidate().pluginId(), error),
-                (context, runtime) -> new JavetPluginRuntime(context, runtime, compatibility.platform()));
+                (context, runtime) -> new JavetPluginRuntime(context, runtime, compatibility.platform(),
+                        requireSourceMap(context.candidate().root())),
+                compatibility.platform());
         coordinator = new PluginLifecycleCoordinator(factory, new ResourceRegistry(), hookTimeout, drainTimeout,
                 QuarantinePolicy.DEFAULT, administration, platformCapabilities);
     }
@@ -269,12 +273,17 @@ public final class JavetPluginHost implements AutoCloseable {
     }
 
     private void admitCompatibility(InstalledPluginCandidate candidate) {
+        SourceMapV3.ValidatedSourceMap sourceMap = SourceMapV3.validateAdjacent(candidate.root());
         CompatibilityResult result = new CompatibilityNegotiator().negotiate(candidate.descriptor(), compatibility);
         if (!result.compatible()) {
             throw new IllegalArgumentException("plugin " + candidate.pluginId() + " is incompatible: "
                     + result.reasons());
         }
-        ShamooPluginMetadata.load(candidate.root(), candidate.descriptor(), compatibility.platform());
+        sourceMaps.put(candidate.root(), sourceMap);
+    }
+
+    private SourceMapV3.ValidatedSourceMap requireSourceMap(Path root) {
+        return Objects.requireNonNull(sourceMaps.remove(root), "validated source map");
     }
 
     private void indexSources() throws IOException {
@@ -283,7 +292,7 @@ public final class JavetPluginHost implements AutoCloseable {
             for (Path path : paths.filter(Files::isDirectory)
                     .filter(path -> !path.equals(stagingDirectory)).toList()) {
                 try {
-                    String descriptorJson = Files.readString(path.resolve(PluginDiscovery.DESCRIPTOR_FILE));
+                    String descriptorJson = Files.readString(path.resolve(PluginArtifactProtocol.MANIFEST_FILE));
                     PluginId pluginId = new PluginId(codec.parse(descriptorJson).name());
                     if (candidates.containsKey(pluginId) || rejectedCandidates.contains(pluginId)) {
                         sourceIdentities.put(path.toAbsolutePath().normalize(), pluginId);
@@ -351,6 +360,7 @@ public final class JavetPluginHost implements AutoCloseable {
         if (!normalized.startsWith(stagingDirectory) || normalized.equals(stagingDirectory)) {
             throw new IllegalArgumentException("refusing to delete non-snapshot path: " + snapshot);
         }
+        sourceMaps.remove(normalized);
         deleteTree(normalized);
     }
 

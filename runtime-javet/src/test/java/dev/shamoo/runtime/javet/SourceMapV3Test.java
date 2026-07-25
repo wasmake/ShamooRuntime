@@ -20,19 +20,37 @@ class SourceMapV3Test {
 
     @Test
     void loadsAdjacentDeployedMapAndUsesNearestSegmentForStackColumns() throws Exception {
-        Files.createDirectories(deployedPlugin.resolve("paper"));
-        Files.writeString(deployedPlugin.resolve("paper/index.js.map"), """
-                {"version":3,"sources":["../src/plugin.ts"],"mappings":"AAAA"}
+        Files.writeString(deployedPlugin.resolve("index.js.map"), """
+                {"version":3,"sources":["src/plugin.ts"],"mappings":"AAAA"}
                 """);
         NodePolicy policy = new NodePolicy(List.of(), new FilesystemPolicy(List.of(), List.of()),
                 false, false, false, false);
         try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(new PluginId("mapped"), deployedPlugin, policy)) {
-            SourceMapV3.registerAdjacent(runtime, deployedPlugin, "paper/index.js").toCompletableFuture().join();
+            SourceMapV3.registerAdjacent(runtime, deployedPlugin).toCompletableFuture().join();
             CompletionException failure = assertThrows(CompletionException.class,
-                    () -> runtime.evaluate("throw new Error('mapped');", "paper/index.js").join());
+                    () -> runtime.evaluate("throw new Error('mapped');", "index.js").join());
             RuntimeEvaluationError error = assertInstanceOf(RuntimeEvaluationError.class, failure.getCause());
             assertEquals("src/plugin.ts", error.sourcePosition().resourceName());
             assertEquals(1, error.sourcePosition().line());
         }
+    }
+
+    @Test
+    void rejectsMissingAdjacentMap() {
+        NodePolicy policy = new NodePolicy(List.of(), new FilesystemPolicy(List.of(), List.of()),
+                false, false, false, false);
+        try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(new PluginId("missing"), deployedPlugin, policy)) {
+            CompletionException failure = assertThrows(CompletionException.class,
+                    () -> SourceMapV3.registerAdjacent(runtime, deployedPlugin).toCompletableFuture().join());
+            assertInstanceOf(IllegalArgumentException.class, failure.getCause());
+        }
+    }
+
+    @Test
+    void validationRejectsMalformedMappingSemanticsWithoutRuntime() throws Exception {
+        Files.writeString(deployedPlugin.resolve("index.js.map"),
+                "{\"version\":3,\"sources\":[\"src/plugin.ts\"],\"mappings\":\"A!AA\"}");
+
+        assertThrows(IllegalArgumentException.class, () -> SourceMapV3.validateAdjacent(deployedPlugin));
     }
 }

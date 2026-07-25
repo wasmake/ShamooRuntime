@@ -1,5 +1,6 @@
 package dev.shamoo.runtime.javet;
 
+import dev.shamoo.runtime.core.CompiledBindingMetadata;
 import dev.shamoo.runtime.core.PluginRuntime;
 import dev.shamoo.runtime.core.HotStatePluginRuntime;
 import dev.shamoo.runtime.core.PluginRuntimeContext;
@@ -17,6 +18,7 @@ import dev.shamoo.runtime.core.DependentReloadPolicy;
 import dev.shamoo.runtime.core.PluginServiceProxy;
 import dev.shamoo.runtime.core.ScriptCallback;
 import dev.shamoo.runtime.protocol.EventContract;
+import dev.shamoo.runtime.protocol.PlatformKind;
 import dev.shamoo.runtime.protocol.SemanticVersion;
 import dev.shamoo.runtime.protocol.SemverRange;
 import dev.shamoo.runtime.protocol.ServiceContract;
@@ -29,18 +31,21 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
     private final Function<PluginRuntimeContext, Map<String, HostFunction>> bindings;
     private final Function<PluginRuntimeContext, RuntimeErrorReporter> reporters;
     private final BiFunction<PluginRuntimeContext, ShamooNodeRuntime, PluginRuntime> lifecycle;
+    private final PlatformKind platform;
 
     public JavetPluginRuntimeFactory(
             ShamooNodeRuntimeManager manager,
             ShamooNodeRuntimeOptions options,
             Function<PluginRuntimeContext, Map<String, HostFunction>> bindings,
             Function<PluginRuntimeContext, RuntimeErrorReporter> reporters,
-            BiFunction<PluginRuntimeContext, ShamooNodeRuntime, PluginRuntime> lifecycle) {
+            BiFunction<PluginRuntimeContext, ShamooNodeRuntime, PluginRuntime> lifecycle,
+            PlatformKind platform) {
         this.manager = Objects.requireNonNull(manager, "manager");
         this.options = Objects.requireNonNull(options, "options");
         this.bindings = Objects.requireNonNull(bindings, "bindings");
         this.reporters = Objects.requireNonNull(reporters, "reporters");
         this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle");
+        this.platform = Objects.requireNonNull(platform, "platform");
     }
 
     @Override
@@ -48,22 +53,22 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
     public CompletionStage<PluginRuntime> create(PluginRuntimeContext context) {
         Objects.requireNonNull(context, "context");
         try {
-            ShamooPluginMetadata metadata = ShamooPluginMetadata.load(context.candidate().root(),
-                    context.candidate().descriptor(), metadataPlatform(context));
+            ShamooPluginMetadata metadata = ShamooPluginMetadata.from(context.candidate().descriptor(), platform);
             Map<String, HostFunction> hostBindings = new LinkedHashMap<>(bindings.apply(context));
             AtomicReference<ShamooNodeRuntime> runtimeReference = new AtomicReference<>();
             Map<String, PluginServiceProxy> serviceProxies = new java.util.concurrent.ConcurrentHashMap<>();
             addCoreBindings(context, metadata, hostBindings, runtimeReference, serviceProxies);
             context.platformCapabilities().operations().forEach((name, operation) -> {
                 HostFunction previous = hostBindings.putIfAbsent(name, arguments -> {
-                    if (!metadata.permitsPlatformOperation(name)) {
-                        throw new SecurityException("compiled metadata does not authorize platform operation " + name);
-                    }
                     if (arguments.isEmpty() || !(arguments.getFirst() instanceof Map<?, ?> bindingMetadata)) {
                         throw new IllegalArgumentException(name + " requires compiled binding metadata");
                     }
+                    CompiledBindingMetadata parsedBinding = CompiledBindingMetadata.from(bindingMetadata);
+                    if (!metadata.permitsPlatformOperation(name, parsedBinding)) {
+                        throw new SecurityException("compiled metadata does not authorize platform operation " + name);
+                    }
                     Object result = context.platformCapabilities().invoke(name, context.candidate().pluginId(),
-                            bindingMetadata, adaptCallbacks(arguments.subList(1, arguments.size()), runtimeReference));
+                            parsedBinding, adaptCallbacks(arguments.subList(1, arguments.size()), runtimeReference));
                     if (result instanceof AutoCloseable resource) {
                         context.resources().register(context.candidate().pluginId(),
                                 dev.shamoo.runtime.core.ResourceCategory.GENERIC,
@@ -181,18 +186,6 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
         if (!version.equals(metadata.events().get(name))) {
             throw new SecurityException("compiled metadata does not authorize event " + name);
         }
-    }
-
-    private static dev.shamoo.runtime.protocol.PlatformKind metadataPlatform(PluginRuntimeContext context) {
-        boolean paper = context.candidate().descriptor().platforms().paper().enabled();
-        boolean velocity = context.candidate().descriptor().platforms().velocity().enabled();
-        if (paper == velocity) {
-            String namespace = context.platformCapabilities().bindingNamespace();
-            return "paper".equals(namespace) ? dev.shamoo.runtime.protocol.PlatformKind.PAPER
-                    : dev.shamoo.runtime.protocol.PlatformKind.VELOCITY;
-        }
-        return paper ? dev.shamoo.runtime.protocol.PlatformKind.PAPER
-                : dev.shamoo.runtime.protocol.PlatformKind.VELOCITY;
     }
 
     private static ShamooNodeRuntime requireRuntime(AtomicReference<ShamooNodeRuntime> runtime) {

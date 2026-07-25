@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -33,8 +34,11 @@ class JavetPluginHostTest {
         Path provider = plugin("provider",
                 "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}", """
                 const entrypoint = Object.freeze({
-                  enable() {
+                  enable(context) {
                     host.record('provider-load');
+                    host.record('identity-' + context.plugin);
+                    host.record('platform-' + context.platform);
+                    host.record('compiler-' + context.metadata.version);
                     host.registerCallback('service', async (operation, args) => args[0] + 1);
                     host.shamooProvideService('counter', '1.0.0', 'service');
                   },
@@ -55,10 +59,11 @@ class JavetPluginHostTest {
         try (JavetPluginHost host = host(events)) {
             host.start(Duration.ofSeconds(30));
             assertEquals(2, host.runtimeCount());
-            assertTrue(events.containsAll(List.of("provider-load", "service-42")));
+            assertTrue(events.containsAll(List.of(
+                    "provider-load", "identity-provider", "platform-paper", "compiler-test", "service-42")));
             assertEquals(2, stagingEntries());
 
-            Files.writeString(provider.resolve("index.mjs"), """
+            Files.writeString(provider.resolve("index.js"), """
                     export function load() { host.record('provider-v2'); }
                     export function importHotState(value) { host.record('state-' + value[0]); }
                     export function exportHotState() { return new Uint8Array([8]); }
@@ -69,7 +74,7 @@ class JavetPluginHostTest {
             assertTrue(events.containsAll(List.of("provider-v2", "state-7", "provider-unload")));
             assertEquals(2, stagingEntries());
 
-            Files.writeString(provider.resolve("index.mjs"), """
+            Files.writeString(provider.resolve("index.js"), """
                     export function ready() { throw new Error('candidate failed'); }
                     export function unload() { host.record('failed-candidate-unload'); }
                     """);
@@ -84,7 +89,7 @@ class JavetPluginHostTest {
             assertEquals(1, host.runtimeCount());
             assertTrue(events.contains("consumer-unload"));
             assertEquals(1, stagingEntries());
-            Files.writeString(plugins.resolve("consumer/index.mjs"),
+            Files.writeString(plugins.resolve("consumer/index.js"),
                     "export default Object.freeze({enable(){host.record('consumer-reinstalled')}});\n");
             host.install(plugins.resolve("consumer")).toCompletableFuture().join();
             assertEquals(2, host.runtimeCount());
@@ -117,17 +122,17 @@ class JavetPluginHostTest {
     }
 
     @Test
-    void rejectsCorruptMetadataWithoutStoppingValidPlugins() throws Exception {
+    void rejectsCorruptSourceMapAtAdmissionAndRecoversWatchedCandidate() throws Exception {
         List<String> events = new CopyOnWriteArrayList<>();
         plugin("valid", "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
                 "export function enable() { host.record('valid-ready'); }\n");
         Path corrupt = plugin("corrupt",
                 "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}",
-                "export function enable() {}\n");
-        Files.writeString(corrupt.resolve("shamoo.metadata.json"), "{\"formatVersion\":2}");
+                "export function enable() { host.record('corrupt-recovered'); }\n");
+        Files.writeString(corrupt.resolve("index.js.map"), "{\"version\":2}");
 
         try (JavetPluginHost host = host(events)) {
-            host.start(Duration.ofSeconds(30));
+            host.start(Duration.ofMillis(50));
             assertEquals(1, host.runtimeCount());
             assertEquals(List.of("valid"), host.snapshots().stream()
                     .map(snapshot -> snapshot.pluginId().value()).toList());
@@ -135,6 +140,15 @@ class JavetPluginHostTest {
                     .map(status -> status.pluginId().value() + ":" + status.active()).toList());
             assertTrue(events.contains("valid-ready"));
             assertEquals(1, stagingEntries());
+
+            Files.writeString(corrupt.resolve("index.js.map"),
+                    "{\"version\":3,\"sources\":[\"src/plugin.ts\"],\"mappings\":\"AAAA\"}");
+            await(() -> events.contains("corrupt-recovered") && host.pluginStatuses().stream()
+                    .anyMatch(status -> "corrupt".equals(status.pluginId().value()) && status.active()));
+            assertEquals(2, host.runtimeCount());
+            assertEquals(List.of("corrupt:true", "valid:true"), host.pluginStatuses().stream()
+                    .map(status -> status.pluginId().value() + ":" + status.active()).toList());
+            assertEquals(2, stagingEntries());
         }
         assertEquals(0, stagingEntries());
     }
@@ -170,31 +184,46 @@ class JavetPluginHostTest {
 
     private Path plugin(String name, String dependencies, String source) throws Exception {
         Path root = Files.createDirectory(plugins.resolve(name));
-        Files.writeString(root.resolve("index.mjs"), source);
+        Files.writeString(root.resolve("index.js"), source);
+        Files.writeString(root.resolve("index.js.map"),
+                "{\"version\":3,\"sources\":[\"src/plugin.ts\"],\"mappings\":\"AAAA\"}");
+        String communication = switch (name) {
+            case "provider" -> "{\"services\":[{\"id\":\"counter\",\"version\":\"1.0.0\","
+                    + "\"componentId\":\"provider\",\"methods\":[\"increment\"]}],\"events\":[],\"consumers\":[]}";
+            case "consumer" -> "{\"services\":[],\"events\":[],\"consumers\":[{"
+                    + "\"id\":\"counter\",\"versionRange\":\"^1.0.0\","
+                    + "\"dependentReload\":\"keep-running\"}]}";
+            default -> "{\"services\":[],\"events\":[],\"consumers\":[]}";
+        };
+        String components = switch (name) {
+            case "provider" -> "[{\"id\":\"provider\",\"kind\":\"service\",\"name\":\"Provider\","
+                    + "\"file\":\"src/plugin.ts\",\"platform\":\"paper\",\"decorators\":[],"
+                    + "\"constructor\":[],\"properties\":[],\"methods\":[{\"name\":\"increment\","
+                    + "\"decorators\":[],\"parameters\":[],\"location\":{\"file\":\"src/plugin.ts\","
+                    + "\"line\":1,\"column\":1}}],\"location\":{\"file\":\"src/plugin.ts\","
+                    + "\"line\":1,\"column\":1}}]";
+            default -> "[]";
+        };
         Files.writeString(root.resolve("shamoo-plugin.json"), """
                 {"name":"%s","displayName":"%s","version":"1.0.0",
-                "shamoo":{"api":"^0.1.0","runtime":"^0.1.0","manifest":1},
-                "platforms":{"paper":{"enabled":true,"entrypoint":"index.mjs","minecraft":"1.21.x",
-                "paperApi":"1.21.x"},"velocity":{"enabled":false}},
+                "shamoo":{"api":"^0.1.0","runtime":"^0.1.0","manifest":2},
+                "platforms":{"paper":{"enabled":true,"minecraft":"1.21.x",
+                "paperApi":"1.21.x","nms":false,"packets":false},"velocity":{"enabled":false}},
                 "dependencies":%s,
                 "node":{"builtins":[],"filesystem":{"read":[],"write":[]},"network":false,
                 "workers":false,"childProcess":false,"nativeAddons":false},
-                "reload":{"watch":true,"debounceMs":100,"preserveState":true}}
-                """.formatted(name, name, dependencies));
-        String communication = switch (name) {
-            case "provider" -> "\"communication\":{\"services\":[{\"id\":\"counter\",\"version\":\"1.0.0\","
-                    + "\"componentId\":\"provider\",\"methods\":[\"increment\"]}],\"events\":[],\"consumers\":[]},";
-            case "consumer" -> "\"communication\":{\"services\":[],\"events\":[],\"consumers\":[{"
-                    + "\"id\":\"counter\",\"versionRange\":\"^1.0.0\",\"dependentReload\":\"keep-running\"}]},";
-            default -> "";
-        };
-        Files.writeString(root.resolve("shamoo.metadata.json"), """
-                {"formatVersion":2,"compilerVersion":"test","packageName":"@fixture/%s",
-                "components":[],"modules":[],%s"entrypoints":{"paper":{"source":"src/plugin.ts",
-                "output":"index.mjs"}},"sourceMaps":[{"generated":"index.mjs","map":"index.mjs.map",
-                "format":"source-map-v3"}]}
-                """.formatted(name, communication));
+                "reload":{"watch":true,"debounceMs":100,"preserveState":true},
+                "compiler":{"version":"test","components":%s,"modules":[],"communication":%s}}
+                """.formatted(name, name, dependencies, components, communication));
         return root;
+    }
+
+    private static void await(Supplier<Boolean> condition) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (!condition.get() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(condition.get());
     }
 
     private long stagingEntries() throws Exception {

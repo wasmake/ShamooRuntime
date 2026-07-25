@@ -1,6 +1,7 @@
 package dev.shamoo.runtime.core;
 
 import dev.shamoo.runtime.protocol.ManifestCodec;
+import dev.shamoo.runtime.protocol.PluginArtifactProtocol;
 import dev.shamoo.runtime.protocol.PluginDescriptor;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -21,11 +22,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /** Secure, deterministic discovery of directory-based plugin installations. */
 public final class PluginDiscovery implements PluginStager {
-    public static final String DESCRIPTOR_FILE = "shamoo-plugin.json";
     private static final String STAGING_DIRECTORY = ".shamoo-staging";
     private final ManifestCodec codec;
     private final Duration stabilityWindow;
@@ -104,9 +105,9 @@ public final class PluginDiscovery implements PluginStager {
         if (!stamps(first).equals(stamps(second))) {
             throw discovery("candidate_unstable", candidateRoot, "plugin files changed during discovery", null);
         }
-        FileSnapshot descriptorSnapshot = second.get(DESCRIPTOR_FILE);
+        FileSnapshot descriptorSnapshot = second.get(PluginArtifactProtocol.MANIFEST_FILE);
         if (descriptorSnapshot == null) {
-            throw discovery("descriptor_missing", canonicalRoot.resolve(DESCRIPTOR_FILE),
+            throw discovery("descriptor_missing", canonicalRoot.resolve(PluginArtifactProtocol.MANIFEST_FILE),
                     "plugin descriptor is missing", null);
         }
         Path temporary = Files.createTempDirectory(stagingRoot, ".snapshot-");
@@ -129,7 +130,7 @@ public final class PluginDiscovery implements PluginStager {
             return new InstalledPluginCandidate(new PluginId(descriptor.name()), descriptor, staged, checksums);
         } catch (RuntimeException exception) {
             deleteTree(temporary);
-            throw discovery("descriptor_invalid", canonicalRoot.resolve(DESCRIPTOR_FILE),
+            throw discovery("descriptor_invalid", canonicalRoot.resolve(PluginArtifactProtocol.MANIFEST_FILE),
                     "plugin descriptor is invalid", exception);
         } catch (IOException exception) {
             deleteTree(temporary);
@@ -139,27 +140,31 @@ public final class PluginDiscovery implements PluginStager {
 
     private static Map<String, FileSnapshot> inventory(Path root) throws IOException {
         Map<String, FileSnapshot> inventory = new java.util.TreeMap<>();
-        try (var paths = Files.walk(root)) {
-            for (Path path : paths.sorted().toList()) {
-                if (path.equals(root)) {
-                    continue;
-                }
-                if (Files.isSymbolicLink(path)) {
-                    throw discovery("symbolic_link_rejected", path, "symbolic links are not allowed", null);
-                }
-                BasicFileAttributes attributes = Files.readAttributes(
-                        path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-                if (attributes.isRegularFile()) {
-                    String relative = root.relativize(path).toString()
-                            .replace(path.getFileSystem().getSeparator(), "/");
-                    byte[] content = Files.readAllBytes(path);
-                    inventory.put(relative, new FileSnapshot(
-                            new FileStamp(attributes.size(), attributes.lastModifiedTime().toMillis(),
-                                    checksum(content)), content));
-                } else if (!attributes.isDirectory()) {
-                    throw discovery("unsupported_file_type", path, "plugin contains an unsupported file type", null);
-                }
+        for (Path path : list(root)) {
+            if (Files.isSymbolicLink(path)) {
+                throw discovery("symbolic_link_rejected", path, "symbolic links are not allowed", null);
             }
+            BasicFileAttributes attributes = Files.readAttributes(
+                    path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!attributes.isRegularFile()) {
+                throw discovery("invalid_candidate_layout", path,
+                        "plugin candidates may contain only the three protocol files", null);
+            }
+            String name = Objects.requireNonNull(path.getFileName(), "candidate file name").toString();
+            byte[] content = Files.readAllBytes(path);
+            inventory.put(name, new FileSnapshot(
+                    new FileStamp(attributes.size(), attributes.lastModifiedTime().toMillis(), checksum(content)),
+                    content));
+        }
+        if (!inventory.keySet().equals(PluginArtifactProtocol.REQUIRED_FILES)) {
+            Set<String> missing = new java.util.TreeSet<>(PluginArtifactProtocol.REQUIRED_FILES);
+            missing.removeAll(inventory.keySet());
+            Set<String> extra = new java.util.TreeSet<>(inventory.keySet());
+            extra.removeAll(PluginArtifactProtocol.REQUIRED_FILES);
+            throw discovery("invalid_candidate_layout", root,
+                    "plugin candidate must contain exactly " + PluginArtifactProtocol.REQUIRED_FILES
+                            + "; missing=" + missing + ", extra=" + extra,
+                    null);
         }
         return Map.copyOf(inventory);
     }

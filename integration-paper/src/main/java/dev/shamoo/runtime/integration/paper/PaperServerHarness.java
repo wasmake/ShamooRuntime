@@ -38,11 +38,12 @@ public final class PaperServerHarness {
         Path pluginData = plugins.resolve("ShamooRuntime");
         Files.createDirectories(pluginData);
         Path scriptPlugins = pluginData.resolve("scripts");
+        deleteTree(scriptPlugins);
         Files.createDirectories(scriptPlugins);
         createScriptPlugin(scriptPlugins, "fixture-one");
         createScriptPlugin(scriptPlugins, "fixture-two");
         createScriptPlugin(scriptPlugins, "corrupt");
-        Files.writeString(scriptPlugins.resolve("corrupt/shamoo.metadata.json"), "{\"formatVersion\":2}",
+        Files.writeString(scriptPlugins.resolve("corrupt/index.js.map"), "{\"version\":2}",
                 StandardCharsets.UTF_8);
         Files.writeString(pluginData.resolve("config.yml"), "plugins:\n  directory: scripts\n"
                 + "  stability-millis: 0\n  watch-debounce-millis: 100\n"
@@ -69,6 +70,12 @@ public final class PaperServerHarness {
             if (!ready.await(READY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
                 throw new IllegalStateException("Paper did not initialize ShamooRuntime; inspect " + log);
             }
+            awaitLog(log, "Plugin admission rejected for corrupt");
+            awaitLog(log, "ShamooRuntime initialized with protocol");
+            Files.writeString(scriptPlugins.resolve("corrupt/index.js.map"),
+                    "{\"version\":3,\"sources\":[\"src/plugin.ts\"],\"mappings\":\"AAAA\"}",
+                    StandardCharsets.UTF_8);
+            awaitLog(log, "SHAMOO_FIXTURE_LIFECYCLE corrupt");
             verifyStatusPacketPath(port, log);
             verifyRuntimeCommands(process, log);
         } finally {
@@ -89,29 +96,27 @@ public final class PaperServerHarness {
     private static void createScriptPlugin(Path plugins, String name) throws IOException {
         Path root = plugins.resolve(name);
         Files.createDirectories(root);
-        Files.writeString(root.resolve("index.mjs"), "export default Object.freeze({enable(){"
+        Files.writeString(root.resolve("index.js"), "export default Object.freeze({enable(){"
                 + "console.log('SHAMOO_FIXTURE_LIFECYCLE " + name + "')}});\n", StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("index.js.map"),
+                "{\"version\":3,\"sources\":[\"src/plugin.ts\"],\"mappings\":\"AAAA\"}",
+                StandardCharsets.UTF_8);
         Files.writeString(root.resolve("shamoo-plugin.json"), manifest(name), StandardCharsets.UTF_8);
-        Files.writeString(root.resolve("shamoo.metadata.json"), metadata(name, "paper"), StandardCharsets.UTF_8);
-    }
-
-    private static String metadata(String name, String platform) {
-        return "{\"formatVersion\":2,\"compilerVersion\":\"process-fixture\",\"packageName\":\"@fixture/"
-                + name + "\",\"components\":[],\"modules\":[],\"entrypoints\":{\"" + platform
-                + "\":{\"source\":\"src/plugin.ts\",\"output\":\"index.mjs\"}}}";
     }
 
     private static String manifest(String name) {
-        String platforms = "\"paper\":{\"enabled\":true,\"entrypoint\":\"index.mjs\","
-                + "\"minecraft\":\"1.21.x\",\"paperApi\":\"1.21.x\"},"
+        String platforms = "\"paper\":{\"enabled\":true,\"minecraft\":\"1.21.x\","
+                + "\"paperApi\":\"1.21.x\",\"nms\":false,\"packets\":false},"
                 + "\"velocity\":{\"enabled\":false}";
         return "{\"name\":\"" + name + "\",\"displayName\":\"" + name + "\",\"version\":\"1.0.0\","
-                + "\"shamoo\":{\"api\":\"^0.1.0\",\"runtime\":\"^0.1.0\",\"manifest\":1},"
+                + "\"shamoo\":{\"api\":\"^0.1.0\",\"runtime\":\"^0.1.0\",\"manifest\":2},"
                 + "\"platforms\":{" + platforms + "},\"dependencies\":{\"required\":{},\"optional\":{},"
                 + "\"loadBefore\":[],\"loadAfter\":[]},\"node\":{\"builtins\":[],\"filesystem\":{"
                 + "\"read\":[],\"write\":[]},\"network\":false,\"workers\":false,\"childProcess\":false,"
                 + "\"nativeAddons\":false},\"reload\":{\"watch\":true,\"debounceMs\":100,"
-                + "\"preserveState\":true}}";
+                + "\"preserveState\":true},\"compiler\":{\"version\":\"process-fixture\","
+                + "\"components\":[],\"modules\":[],\"communication\":{\"services\":[],"
+                + "\"events\":[],\"consumers\":[]}}}";
     }
 
     private static void verifyStatusPacketPath(int port, Path log) throws IOException, InterruptedException {
@@ -162,6 +167,17 @@ public final class PaperServerHarness {
             Thread.sleep(50);
         }
         throw new IllegalStateException("Paper runtime commands were not observed; inspect " + log);
+    }
+
+    private static void awaitLog(Path log, String expected) throws IOException, InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (Files.exists(log) && Files.readString(log).contains(expected)) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+        throw new IllegalStateException("Expected log entry was not observed: " + expected + "; inspect " + log);
     }
 
     private static void writePacket(OutputStream output, int id, byte[] payload) throws IOException {
@@ -220,5 +236,16 @@ public final class PaperServerHarness {
 
     private static String javaExecutable() {
         return Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    }
+
+    private static void deleteTree(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(path);
+            }
+        }
     }
 }

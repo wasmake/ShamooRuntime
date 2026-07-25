@@ -104,7 +104,7 @@ class CompatibilityNegotiatorTest {
     }
 
     private static PluginDescriptor descriptor() throws IOException {
-        try (InputStream stream = CompatibilityNegotiatorTest.class.getResourceAsStream("/manifests/full-v1.json")) {
+        try (InputStream stream = CompatibilityNegotiatorTest.class.getResourceAsStream("/manifests/full-v2.json")) {
             if (stream == null) {
                 throw new IOException("Missing golden manifest");
             }

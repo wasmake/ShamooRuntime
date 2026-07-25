@@ -28,7 +28,7 @@ class PluginDirectoryWatcherTest {
         try (PluginDirectoryWatcher watcher = new PluginDirectoryWatcher(
                 pluginsDirectory, Duration.ofMillis(100), observed::add, errors::add)) {
             watcher.start();
-            Path source = candidate.resolve("index.mjs");
+            Path source = candidate.resolve("index.js");
             Files.writeString(source, "one");
             Thread.sleep(60);
             Files.writeString(source, "two");

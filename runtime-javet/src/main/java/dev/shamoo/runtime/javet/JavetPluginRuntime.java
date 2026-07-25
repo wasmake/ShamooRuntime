@@ -3,6 +3,7 @@ package dev.shamoo.runtime.javet;
 import dev.shamoo.runtime.core.HotStatePluginRuntime;
 import dev.shamoo.runtime.core.PluginRuntimeContext;
 import dev.shamoo.runtime.protocol.PlatformKind;
+import dev.shamoo.runtime.protocol.PluginArtifactProtocol;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -17,34 +18,36 @@ public final class JavetPluginRuntime implements HotStatePluginRuntime {
     private static final int MAX_HOT_STATE_BYTES = 1_048_576;
     private static final String LIFECYCLE_GLOBAL = "__shamooPluginLifecycle";
     private final ShamooNodeRuntime runtime;
-    private final String entrypoint;
     private final String source;
-    private final ModuleKind moduleKind;
     private final PlatformKind platform;
-    private final ShamooPluginMetadata metadata;
+    private final String pluginName;
     private final Path pluginRoot;
+    private final SourceMapV3.ValidatedSourceMap sourceMap;
     private boolean initialized;
 
     public JavetPluginRuntime(PluginRuntimeContext context, ShamooNodeRuntime runtime, PlatformKind platform) {
+        this(context, runtime, platform, null);
+    }
+
+    JavetPluginRuntime(PluginRuntimeContext context, ShamooNodeRuntime runtime, PlatformKind platform,
+            SourceMapV3.ValidatedSourceMap sourceMap) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(platform, "platform");
         this.platform = platform;
-        entrypoint = platform == PlatformKind.PAPER
-                ? context.candidate().descriptor().platforms().paper().entrypoint()
-                : context.candidate().descriptor().platforms().velocity().entrypoint();
+        pluginName = context.candidate().descriptor().name();
         pluginRoot = context.candidate().root();
-        Path path = pluginRoot.resolve(entrypoint).normalize();
+        this.sourceMap = sourceMap;
+        Path path = pluginRoot.resolve(PluginArtifactProtocol.MODULE_FILE).normalize();
         if (!path.startsWith(pluginRoot) || !Files.isRegularFile(path)) {
-            throw new IllegalArgumentException("plugin entrypoint is not a regular staged file: " + entrypoint);
+            throw new IllegalArgumentException("plugin module is not a regular staged file: "
+                    + PluginArtifactProtocol.MODULE_FILE);
         }
         try {
-            metadata = ShamooPluginMetadata.load(pluginRoot, context.candidate().descriptor(), platform);
-            String pluginSource = Files.readString(path, StandardCharsets.UTF_8);
-            moduleKind = entrypoint.endsWith(".cjs") ? ModuleKind.COMMON_JS : ModuleKind.ESM;
-            source = moduleKind == ModuleKind.COMMON_JS ? pluginSource + lifecycleCapture(moduleKind) : pluginSource;
+            source = Files.readString(path, StandardCharsets.UTF_8);
         } catch (IOException exception) {
-            throw new IllegalArgumentException("unable to read plugin entrypoint: " + entrypoint, exception);
+            throw new IllegalArgumentException("unable to read plugin module: "
+                    + PluginArtifactProtocol.MODULE_FILE, exception);
         }
     }
 
@@ -54,10 +57,11 @@ public final class JavetPluginRuntime implements HotStatePluginRuntime {
             return hook("load");
         }
         initialized = true;
-        CompletionStage<Void> maps = SourceMapV3.registerAdjacent(runtime, pluginRoot, entrypoint);
-        return maps.thenCompose(ignored -> runtime.registerModule(entrypoint, source, moduleKind))
-                .thenCompose(ignored -> moduleKind == ModuleKind.ESM ? executeEsmAdapter()
-                        : runtime.executeModule(entrypoint).thenApply(value -> null))
+        CompletionStage<Void> maps = sourceMap == null
+                ? SourceMapV3.registerAdjacent(runtime, pluginRoot) : sourceMap.register(runtime);
+        return maps.thenCompose(ignored -> runtime.registerModule(
+                        PluginArtifactProtocol.MODULE_FILE, source, ModuleKind.ESM))
+                .thenCompose(ignored -> executeEsmAdapter())
                 .thenCompose(ignored -> hook("load"));
     }
 
@@ -73,7 +77,8 @@ public final class JavetPluginRuntime implements HotStatePluginRuntime {
                 + "?.exportHotState;if(typeof f!=='function')return [];const v=await f();"
                 + "if(v==null)return [];if(v instanceof Uint8Array)return Array.from(v);"
                 + "if(typeof v==='string')return Array.from(new TextEncoder().encode(v));"
-                + "throw new TypeError('exportHotState must return a string or Uint8Array')})()", entrypoint)
+                + "throw new TypeError('exportHotState must return a string or Uint8Array')})()",
+                        PluginArtifactProtocol.MODULE_FILE)
                 .thenApply(JavetPluginRuntime::decodeState);
     }
 
@@ -88,7 +93,7 @@ public final class JavetPluginRuntime implements HotStatePluginRuntime {
                 .mapToObj(Integer::toString).collect(java.util.stream.Collectors.joining(","));
         return runtime.evaluate("(async()=>{const f=globalThis." + LIFECYCLE_GLOBAL
                 + "?.importHotState;if(typeof f==='function')await f(new Uint8Array(["
-                + values + "]))})()", entrypoint).thenApply(ignored -> null);
+                + values + "]))})()", PluginArtifactProtocol.MODULE_FILE).thenApply(ignored -> null);
     }
 
     private CompletionStage<Void> hook(String name) {
@@ -96,19 +101,16 @@ public final class JavetPluginRuntime implements HotStatePluginRuntime {
         return runtime.evaluate("(async()=>{const f=globalThis." + LIFECYCLE_GLOBAL + "?." + name
                 + ";const g=globalThis." + LIFECYCLE_GLOBAL + "?." + actual
                 + ";const h=typeof f==='function'?f:g;if(typeof h==='function')await h(Object.freeze({"
-                + "plugin:" + quote(metadata.packageName()) + ",platform:"
+                + "plugin:" + quote(pluginName) + ",platform:"
                 + quote(platform.name().toLowerCase(java.util.Locale.ROOT))
-                + ",metadata:Object.freeze(host.shamooMetadata())}))})()", entrypoint).thenApply(ignored -> null);
+                + ",metadata:Object.freeze(host.shamooMetadata())}))})()",
+                        PluginArtifactProtocol.MODULE_FILE).thenApply(ignored -> null);
     }
 
     private CompletionStage<Void> executeEsmAdapter() {
         String adapterName = ".shamoo-entrypoint-adapter.mjs";
-        String relative = entrypoint.substring(entrypoint.lastIndexOf('/') + 1);
-        if (entrypoint.contains("/")) {
-            adapterName = entrypoint.substring(0, entrypoint.lastIndexOf('/') + 1) + adapterName;
-        }
         final String adapter = adapterName;
-        String sourceCode = "import * as entrypoint from './" + relative + "';\n"
+        String sourceCode = "import * as entrypoint from './" + PluginArtifactProtocol.MODULE_FILE + "';\n"
                 + "const value=entrypoint.default&&typeof entrypoint.default==='object'"
                 + "?entrypoint.default:entrypoint;globalThis." + LIFECYCLE_GLOBAL + "=value;\n";
         return runtime.registerModule(adapter, sourceCode, ModuleKind.ESM)
@@ -145,21 +147,4 @@ public final class JavetPluginRuntime implements HotStatePluginRuntime {
         return state;
     }
 
-    private static String lifecycleCapture(ModuleKind kind) {
-        if (kind == ModuleKind.COMMON_JS) {
-            return "\n;globalThis." + LIFECYCLE_GLOBAL
-                    + "=(module.exports?.default&&typeof module.exports.default==='object')"
-                    + "?module.exports.default:((module.exports&&typeof module.exports==='object')"
-                    + "?module.exports:{});\n";
-        }
-        return "\n;globalThis." + LIFECYCLE_GLOBAL + "={"
-                + "load:typeof load==='function'?load:(typeof onLoad==='function'?onLoad:undefined),"
-                + "enable:typeof enable==='function'?enable:(typeof onEnable==='function'?onEnable:undefined),"
-                + "ready:typeof ready==='function'?ready:(typeof onReady==='function'?onReady:undefined),"
-                + "drain:typeof drain==='function'?drain:(typeof onDrain==='function'?onDrain:undefined),"
-                + "disable:typeof disable==='function'?disable:(typeof onDisable==='function'?onDisable:undefined),"
-                + "unload:typeof unload==='function'?unload:(typeof onUnload==='function'?onUnload:undefined),"
-                + "exportHotState:typeof exportHotState==='function'?exportHotState:undefined,"
-                + "importHotState:typeof importHotState==='function'?importHotState:undefined};\n";
-    }
 }

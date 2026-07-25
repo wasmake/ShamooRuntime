@@ -36,8 +36,10 @@ final class ManifestValidation {
     }
 
     static String relativePath(String value, String path) {
-        text(value, path);
-        if (value.length() > MAX_PATH_LENGTH) {
+        if (value == null || value.isBlank()) {
+            fail("invalid_value", path, "must not be blank");
+        }
+        if (value.codePointCount(0, value.length()) > MAX_PATH_LENGTH) {
             fail("unsafe_path", path, "must be at most " + MAX_PATH_LENGTH + " characters");
         }
         boolean windowsDrive = value.length() >= 2 && Character.isLetter(value.charAt(0)) && value.charAt(1) == ':';
@@ -53,14 +55,6 @@ final class ManifestValidation {
             if (segment.isEmpty() || ".".equals(segment) || "..".equals(segment)) {
                 fail("unsafe_path", path, "must not contain empty or traversal segments");
             }
-        }
-        return value;
-    }
-
-    static String entrypoint(String value, String path) {
-        relativePath(value, path);
-        if ("./".equals(value) || !(value.endsWith(".js") || value.endsWith(".mjs") || value.endsWith(".cjs"))) {
-            fail("invalid_entrypoint", path, "must be a safe relative .js, .mjs, or .cjs file");
         }
         return value;
     }
