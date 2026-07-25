@@ -79,7 +79,7 @@ class PluginLifecycleCoordinatorTest {
         TestRuntime runtime = new TestRuntime();
         runtime.load = () -> CompletableFuture.failedFuture(new IllegalStateException("broken"));
         PluginLifecycleCoordinator coordinator = new PluginLifecycleCoordinator(
-                context -> CompletableFuture.completedFuture(runtime), new ResourceRegistry(), TIMEOUT, TIMEOUT,
+                context -> CompletableFuture.completedFuture(runtime), new ResourceRegistry(), TIMEOUT,
                 new QuarantinePolicy(2, true), executor);
         PluginId id = installOne(coordinator);
         assertThrows(CompletionException.class,
@@ -102,7 +102,7 @@ class PluginLifecycleCoordinatorTest {
         TestRuntime runtime = new TestRuntime();
         PluginLifecycleCoordinator coordinator = new PluginLifecycleCoordinator(
                 context -> CompletableFuture.completedFuture(runtime), new ResourceRegistry(),
-                Duration.ofSeconds(1), Duration.ofMillis(30), new QuarantinePolicy(3, true), executor);
+                Duration.ofMillis(30), new QuarantinePolicy(3, true), executor);
         PluginId id = installOne(coordinator);
         coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
         InvocationAdmission.Lease lease = coordinator.admitInvocation(id);
@@ -122,7 +122,7 @@ class PluginLifecycleCoordinatorTest {
         TestRuntime runtime = new TestRuntime(events, "plugin");
         PluginLifecycleCoordinator coordinator = new PluginLifecycleCoordinator(
                 context -> CompletableFuture.completedFuture(runtime), new ResourceRegistry(),
-                TIMEOUT, Duration.ofMillis(300), new QuarantinePolicy(1, true), executor);
+                Duration.ofMillis(300), new QuarantinePolicy(1, true), executor);
         PluginId id = installOne(coordinator);
         coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
         InvocationAdmission.Lease lease = coordinator.admitInvocation(id);
@@ -140,35 +140,36 @@ class PluginLifecycleCoordinatorTest {
     }
 
     @Test
-    void timedOutHookIsCancelled() {
-        NonCancellableFuture<Void> load = new NonCancellableFuture<>();
+    void lifecycleHookWaitsWithoutDeadline() {
+        CompletableFuture<Void> load = new CompletableFuture<>();
         TestRuntime runtime = new TestRuntime();
         runtime.load = () -> load;
         PluginLifecycleCoordinator coordinator = new PluginLifecycleCoordinator(
                 context -> CompletableFuture.completedFuture(runtime), new ResourceRegistry(),
-                Duration.ofMillis(30), TIMEOUT, QuarantinePolicy.DEFAULT, executor);
+                Duration.ofMillis(30), QuarantinePolicy.DEFAULT, executor);
         PluginId id = installOne(coordinator);
-        assertThrows(CompletionException.class,
-                () -> coordinator.load(id, UUID.randomUUID()).toCompletableFuture().join());
-        assertTrue(load.cancelAttempted.get());
+        CompletableFuture<Void> loading = coordinator.load(id, UUID.randomUUID()).toCompletableFuture();
+        sleep(75);
+        assertFalse(loading.isDone());
         load.complete(null);
-        assertEquals(PluginLifecycleState.LOAD_FAILED, coordinator.snapshot(id).state());
+        loading.join();
+        assertEquals(PluginLifecycleState.LOADED, coordinator.snapshot(id).state());
     }
 
     @Test
-    void lateRuntimeCreationIsFencedAndUnloaded() {
-        NonCancellableFuture<PluginRuntime> creation = new NonCancellableFuture<>();
-        TestRuntime staleRuntime = new TestRuntime();
+    void runtimeCreationWaitsWithoutDeadline() {
+        CompletableFuture<PluginRuntime> creation = new CompletableFuture<>();
+        TestRuntime runtime = new TestRuntime();
         PluginLifecycleCoordinator coordinator = new PluginLifecycleCoordinator(
-                context -> creation, new ResourceRegistry(), Duration.ofMillis(30), TIMEOUT,
+                context -> creation, new ResourceRegistry(), Duration.ofMillis(30),
                 QuarantinePolicy.DEFAULT, executor);
         PluginId id = installOne(coordinator);
-        assertThrows(CompletionException.class,
-                () -> coordinator.load(id, UUID.randomUUID()).toCompletableFuture().join());
-        assertTrue(creation.cancelAttempted.get());
-        creation.complete(staleRuntime);
-        await(() -> staleRuntime.events.contains("plugin:unload"));
-        assertEquals(PluginLifecycleState.LOAD_FAILED, coordinator.snapshot(id).state());
+        CompletableFuture<Void> loading = coordinator.load(id, UUID.randomUUID()).toCompletableFuture();
+        sleep(75);
+        assertFalse(loading.isDone());
+        creation.complete(runtime);
+        loading.join();
+        assertEquals(PluginLifecycleState.LOADED, coordinator.snapshot(id).state());
     }
 
     @Test
@@ -256,7 +257,7 @@ class PluginLifecycleCoordinatorTest {
     void cleanupLeakFailsUnloadAndAppliesLeakQuarantinePolicy() {
         ResourceRegistry resources = new ResourceRegistry();
         PluginLifecycleCoordinator coordinator = new PluginLifecycleCoordinator(
-                context -> CompletableFuture.completedFuture(new TestRuntime()), resources, TIMEOUT, TIMEOUT,
+                context -> CompletableFuture.completedFuture(new TestRuntime()), resources, TIMEOUT,
                 new QuarantinePolicy(5, true), executor);
         PluginId id = installOne(coordinator);
         coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
@@ -382,7 +383,7 @@ class PluginLifecycleCoordinatorTest {
                 return CompletableFuture.completedFuture(active);
             }
             return CompletableFuture.completedFuture(candidate);
-        }, resources, TIMEOUT, TIMEOUT, QuarantinePolicy.DEFAULT, executor);
+        }, resources, TIMEOUT, QuarantinePolicy.DEFAULT, executor);
         PluginId id = installOne(coordinator);
         coordinator.enableAll(UUID.randomUUID()).toCompletableFuture().join();
 
@@ -473,7 +474,7 @@ class PluginLifecycleCoordinatorTest {
     }
 
     private PluginLifecycleCoordinator coordinator(PluginRuntimeFactory factory) {
-        return new PluginLifecycleCoordinator(factory, new ResourceRegistry(), TIMEOUT, TIMEOUT,
+        return new PluginLifecycleCoordinator(factory, new ResourceRegistry(), TIMEOUT,
                 QuarantinePolicy.DEFAULT, executor);
     }
 
@@ -498,16 +499,6 @@ class PluginLifecycleCoordinatorTest {
             sleep(5);
         }
         assertTrue(condition.get());
-    }
-
-    private static final class NonCancellableFuture<T> extends CompletableFuture<T> {
-        private final AtomicBoolean cancelAttempted = new AtomicBoolean();
-
-        @Override
-        public boolean cancel(boolean mayInterruptIfRunning) {
-            cancelAttempted.set(true);
-            return false;
-        }
     }
 
     private static class TestRuntime implements PluginRuntime {

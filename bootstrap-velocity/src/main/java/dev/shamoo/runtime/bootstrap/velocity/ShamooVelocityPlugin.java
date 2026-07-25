@@ -69,15 +69,21 @@ public final class ShamooVelocityPlugin {
             directory = dataDirectory.resolve(directory);
         }
         pluginHost = new JavetPluginHost(directory, compatibility(), platformCapabilities(),
-                Duration.ofMillis(200), Duration.ofSeconds(5), Duration.ofSeconds(5),
+                Duration.ofMillis(200), Duration.ofSeconds(5),
                 context -> Map.of(), System.getLogger(getClass().getName()));
         VelocityRuntimeCommands.register(server, this, commandBridge, pluginHost::pluginStatuses,
                 System.getLogger(getClass().getName()));
-        pluginHost.start(Duration.ofMillis(500));
-        System.getLogger(getClass().getName()).log(
-            System.Logger.Level.INFO, "ShamooRuntime initialized with protocol " + ProtocolVersion.CURRENT
-                    + " and " + pluginHost.runtimeCount() + " isolated plugins"
-                    + " and " + eventRegistry.size() + " generated Velocity events");
+        pluginHost.startAsync(Duration.ofMillis(500)).whenComplete((ignored, failure) -> {
+            if (failure != null) {
+                System.getLogger(getClass().getName()).log(
+                        System.Logger.Level.ERROR, "Unable to initialize the V8 runtime", failure);
+                return;
+            }
+            System.getLogger(getClass().getName()).log(
+                    System.Logger.Level.INFO, "ShamooRuntime initialized with protocol " + ProtocolVersion.CURRENT
+                            + " and " + pluginHost.runtimeCount() + " isolated plugins"
+                            + " and " + eventRegistry.size() + " generated Velocity events");
+        });
     }
 
     private CompatibilityInput compatibility() {

@@ -1,6 +1,7 @@
 package dev.shamoo.runtime.javet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
@@ -27,6 +29,46 @@ import org.junit.jupiter.api.io.TempDir;
 class JavetPluginHostTest {
     @TempDir
     Path plugins;
+
+    @Test
+    void startsAsynchronouslyWhilePreservingDependencyOrder() throws Exception {
+        List<String> events = new CopyOnWriteArrayList<>();
+        CompletableFuture<Boolean> firstLoad = new CompletableFuture<>();
+        plugin("first", "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}", """
+                export async function load() {
+                  host.record('first-start');
+                  await host.waitForFirst();
+                  host.record('first-end');
+                }
+                """);
+        plugin("second", "{\"required\":{\"first\":\"*\"},\"optional\":{},"
+                + "\"loadBefore\":[],\"loadAfter\":[]}", """
+                export function load() { host.record('second-start'); }
+                """);
+        SemanticVersion runtime = new SemanticVersion("0.1.0");
+        CompatibilityInput input = new CompatibilityInput(PlatformKind.PAPER,
+                new SemanticVersion("1.21.8"), new SemanticVersion("1.21.8"), null,
+                Set.of(), runtime, runtime, ProtocolVersion.CURRENT);
+        try (JavetPluginHost host = new JavetPluginHost(plugins, input, PlatformCapabilities.NONE, Duration.ZERO,
+                Duration.ofSeconds(3), context -> Map.of(
+                        "record", arguments -> {
+                            events.add(String.valueOf(arguments.getFirst()));
+                            return true;
+                        },
+                        "waitForFirst", arguments -> firstLoad), System.getLogger(getClass().getName()))) {
+            var startup = host.startAsync(Duration.ofSeconds(30));
+
+            await(() -> events.contains("first-start"));
+            assertFalse(startup.toCompletableFuture().isDone());
+            assertFalse(events.contains("second-start"));
+
+            firstLoad.complete(true);
+            startup.toCompletableFuture().join();
+
+            assertEquals(List.of("first-start", "first-end", "second-start"), events);
+            assertThrows(IllegalStateException.class, () -> host.startAsync(Duration.ofSeconds(30)));
+        }
+    }
 
     @Test
     void runsTwoPluginsServicesReloadRollbackAndGenerationDisposal() throws Exception {
@@ -175,7 +217,7 @@ class JavetPluginHostTest {
                 new SemanticVersion("1.21.8"), new SemanticVersion("1.21.8"), null,
                 Set.of(), runtime, runtime, ProtocolVersion.CURRENT);
         return new JavetPluginHost(plugins, input, PlatformCapabilities.NONE, Duration.ZERO,
-                Duration.ofSeconds(3), Duration.ofSeconds(3),
+                Duration.ofSeconds(3),
                 context -> Map.of("record", arguments -> {
                     events.add(String.valueOf(arguments.getFirst()));
                     return true;

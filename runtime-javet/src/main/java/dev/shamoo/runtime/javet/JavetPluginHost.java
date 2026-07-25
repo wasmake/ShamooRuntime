@@ -52,7 +52,7 @@ public final class JavetPluginHost implements AutoCloseable {
     private final Set<PluginId> rejectedCandidates = new java.util.LinkedHashSet<>();
     private final System.Logger logger;
     private PluginDirectoryWatcher watcher;
-    private boolean started;
+    private CompletableFuture<Void> startup;
     private boolean closed;
 
     public JavetPluginHost(
@@ -60,7 +60,6 @@ public final class JavetPluginHost implements AutoCloseable {
             CompatibilityInput compatibility,
             PlatformCapabilities platformCapabilities,
             Duration stabilityWindow,
-            Duration hookTimeout,
             Duration drainTimeout,
             Function<dev.shamoo.runtime.core.PluginRuntimeContext, Map<String, HostFunction>> bindings,
             System.Logger logger) {
@@ -77,13 +76,19 @@ public final class JavetPluginHost implements AutoCloseable {
                 (context, runtime) -> new JavetPluginRuntime(context, runtime, compatibility.platform(),
                         requireSourceMap(context.candidate().root())),
                 compatibility.platform());
-        coordinator = new PluginLifecycleCoordinator(factory, new ResourceRegistry(), hookTimeout, drainTimeout,
+        coordinator = new PluginLifecycleCoordinator(factory, new ResourceRegistry(), drainTimeout,
                 QuarantinePolicy.DEFAULT, administration, platformCapabilities);
     }
 
-    public synchronized void start(Duration watcherQuietWindow) throws IOException {
-        if (started || closed) {
-            throw new IllegalStateException(started ? "plugin host is already started" : "plugin host is closed");
+    public void start(Duration watcherQuietWindow) throws IOException {
+        startAsync(watcherQuietWindow).toCompletableFuture().join();
+    }
+
+    public synchronized CompletionStage<Void> startAsync(Duration watcherQuietWindow) throws IOException {
+        Objects.requireNonNull(watcherQuietWindow, "watcherQuietWindow");
+        if (startup != null || closed) {
+            throw new IllegalStateException(
+                    startup != null ? "plugin host is already started" : "plugin host is closed");
         }
         Files.createDirectories(pluginsDirectory);
         deleteTree(stagingDirectory);
@@ -104,13 +109,33 @@ public final class JavetPluginHost implements AutoCloseable {
             }
         }
         coordinator.install(candidates.values());
+        CompletableFuture<Void> completion = new CompletableFuture<>();
+        startup = completion;
         coordinator.enableAll(UUID.randomUUID(), (pluginId, failure) -> logger.log(System.Logger.Level.ERROR,
-                "Plugin lifecycle startup failed for " + pluginId, failure)).toCompletableFuture().join();
-        indexSources();
-        watcher = new PluginDirectoryWatcher(pluginsDirectory, watcherQuietWindow, this::watcherChanged,
-                error -> logger.log(System.Logger.Level.ERROR, "Plugin directory watcher failed", error));
-        watcher.start();
-        started = true;
+                "Plugin lifecycle startup failed for " + pluginId, failure))
+                .whenComplete((ignored, failure) -> finishStartup(watcherQuietWindow, completion, failure));
+        return completion;
+    }
+
+    private void finishStartup(Duration watcherQuietWindow, CompletableFuture<Void> completion, Throwable failure) {
+        if (failure != null) {
+            completion.completeExceptionally(failure);
+            return;
+        }
+        try {
+            synchronized (this) {
+                if (closed) {
+                    throw new IllegalStateException("plugin host closed during startup");
+                }
+                indexSources();
+                watcher = new PluginDirectoryWatcher(pluginsDirectory, watcherQuietWindow, this::watcherChanged,
+                        error -> logger.log(System.Logger.Level.ERROR, "Plugin directory watcher failed", error));
+                watcher.start();
+            }
+            completion.complete(null);
+        } catch (IOException | RuntimeException startupFailure) {
+            completion.completeExceptionally(startupFailure);
+        }
     }
 
     public CompletionStage<Void> install(Path source) {

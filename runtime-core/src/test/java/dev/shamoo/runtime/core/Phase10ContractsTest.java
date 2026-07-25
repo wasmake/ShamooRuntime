@@ -39,7 +39,7 @@ class Phase10ContractsTest {
             }
             return CompletableFuture.completedFuture(new NoopRuntime(
                     context.candidate().pluginId().equals(new PluginId("consumer")) ? consumerEnables : null));
-        }, new ResourceRegistry(), Duration.ofSeconds(1), Duration.ofSeconds(1),
+        }, new ResourceRegistry(), Duration.ofSeconds(1),
                 QuarantinePolicy.DEFAULT, Runnable::run);
         InstalledPluginCandidate provider = TestCandidates.candidate("provider");
         InstalledPluginCandidate consumer = TestCandidates.candidate("consumer", "1.0.0", """
