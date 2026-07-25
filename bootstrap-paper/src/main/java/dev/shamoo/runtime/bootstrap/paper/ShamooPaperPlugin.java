@@ -71,22 +71,36 @@ public final class ShamooPaperPlugin extends JavaPlugin {
             enablePacketProcessProbe();
             pluginHost = new JavetPluginHost(pluginDirectory(), compatibility(), platformCapabilities(),
                     Duration.ofMillis(getConfig().getLong("plugins.stability-millis", 200)),
-                    Duration.ofMillis(getConfig().getLong("plugins.hook-timeout-millis", 5000)),
                     Duration.ofMillis(getConfig().getLong("plugins.drain-timeout-millis", 5000)),
                     context -> Map.of(), System.getLogger(getClass().getName()));
             PaperRuntimeCommands.register(this, pluginHost::pluginStatuses);
-            pluginHost.start(Duration.ofMillis(getConfig().getLong("plugins.watch-debounce-millis", 500)));
+            pluginHost.startAsync(Duration.ofMillis(getConfig().getLong("plugins.watch-debounce-millis", 500)))
+                    .whenComplete((ignored, failure) -> startupCompleted(failure));
+        } catch (IOException | IllegalStateException exception) {
+            startupFailed(exception);
+        }
+    }
+
+    private void startupCompleted(Throwable failure) {
+        if (failure == null) {
             if (getLogger().isLoggable(Level.INFO)) {
                 getLogger().info("ShamooRuntime initialized with protocol " + ProtocolVersion.CURRENT
                         + " and " + pluginHost.runtimeCount() + " isolated plugins"
                         + " and " + eventRegistry.size() + " generated Paper events");
             }
-        } catch (IOException | IllegalStateException exception) {
-            if (getLogger().isLoggable(Level.SEVERE)) {
-                getLogger().severe("Unable to initialize the V8 runtime: " + exception.getMessage());
-            }
-            getServer().getPluginManager().disablePlugin(this);
+            return;
         }
+        try {
+            getServer().getGlobalRegionScheduler().run(this, ignored -> startupFailed(failure));
+        } catch (RuntimeException schedulingFailure) {
+            failure.addSuppressed(schedulingFailure);
+            getLogger().log(Level.SEVERE, "Unable to schedule V8 startup failure handling", failure);
+        }
+    }
+
+    private void startupFailed(Throwable failure) {
+        getLogger().log(Level.SEVERE, "Unable to initialize the V8 runtime", failure);
+        getServer().getPluginManager().disablePlugin(this);
     }
 
     private java.nio.file.Path pluginDirectory() {

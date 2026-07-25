@@ -28,7 +28,6 @@ import java.util.function.Supplier;
 public final class PluginLifecycleCoordinator {
     private final PluginRuntimeFactory runtimeFactory;
     private final ResourceRegistry resources;
-    private final Duration hookTimeout;
     private final Duration drainTimeout;
     private final QuarantinePolicy quarantinePolicy;
     private final Executor executor;
@@ -45,25 +44,22 @@ public final class PluginLifecycleCoordinator {
     public PluginLifecycleCoordinator(
             PluginRuntimeFactory runtimeFactory,
             ResourceRegistry resources,
-            Duration hookTimeout,
             Duration drainTimeout,
             QuarantinePolicy quarantinePolicy,
             Executor executor) {
-        this(runtimeFactory, resources, hookTimeout, drainTimeout, quarantinePolicy, executor,
+        this(runtimeFactory, resources, drainTimeout, quarantinePolicy, executor,
                 PlatformCapabilities.NONE);
     }
 
     public PluginLifecycleCoordinator(
             PluginRuntimeFactory runtimeFactory,
             ResourceRegistry resources,
-            Duration hookTimeout,
             Duration drainTimeout,
             QuarantinePolicy quarantinePolicy,
             Executor executor,
             PlatformCapabilities platformCapabilities) {
         this.runtimeFactory = Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.resources = Objects.requireNonNull(resources, "resources");
-        this.hookTimeout = positive(hookTimeout, "hookTimeout");
         this.drainTimeout = positive(drainTimeout, "drainTimeout");
         this.quarantinePolicy = Objects.requireNonNull(quarantinePolicy, "quarantinePolicy");
         this.executor = Objects.requireNonNull(executor, "executor");
@@ -226,9 +222,8 @@ public final class PluginLifecycleCoordinator {
                 plugin.services, plugin.events, plugin.generationId);
         CompletionStage<PluginRuntime> creation;
         try {
-            creation = plugin.runtime == null
-                    ? timed(runtimeFactory.create(context), plugin, PluginLifecycleState.LOADING,
-                            correlationId, hookTimeout, runtime -> cleanupLateRuntime(plugin, runtime))
+            creation = plugin.runtime == null ? Objects.requireNonNull(
+                    runtimeFactory.create(context), "runtime factory returned null")
                     : CompletableFuture.completedFuture(plugin.runtime);
         } catch (RuntimeException exception) {
             creation = CompletableFuture.failedFuture(exception);
@@ -308,7 +303,7 @@ public final class PluginLifecycleCoordinator {
         plugin.invocations.stop();
         serviceRegistry.deactivate(plugin.generationId);
         eventBus.deactivate(plugin.generationId);
-        return hookOnly(plugin.runtime::drain, plugin, PluginLifecycleState.DRAINING, correlationId)
+        return hookOnly(plugin.runtime::drain, plugin)
                 .thenCompose(ignored -> timed(plugin.invocations.awaitDrained(drainTimeout), plugin,
                         PluginLifecycleState.DRAINING, correlationId, drainTimeout).thenApply(value -> (Void) null))
                 .thenCompose(ignored -> disableHook(plugin, correlationId))
@@ -350,8 +345,7 @@ public final class PluginLifecycleCoordinator {
         CompletionStage<Void> drained = timed(plugin.invocations.awaitDrained(drainTimeout), plugin,
                 PluginLifecycleState.UNLOADING, correlationId, drainTimeout);
         return drained.thenCompose(ignored -> plugin.runtime == null || plugin.unloadHookComplete
-                ? completed() : hookOnly(plugin.runtime::unload, plugin,
-                        PluginLifecycleState.UNLOADING, correlationId)).thenCompose(ignored -> {
+                ? completed() : hookOnly(plugin.runtime::unload, plugin)).thenCompose(ignored -> {
             plugin.unloadHookComplete = true;
             ResourceCleanupReport report = plugin.resources.cleanup(plugin.candidate.pluginId());
             List<Exception> retiredErrors = retryRetiredResources(plugin.candidate.pluginId());
@@ -387,7 +381,7 @@ public final class PluginLifecycleCoordinator {
             PluginLifecycleState success,
             PluginLifecycleState failed,
             UUID correlationId) {
-        return hookOnly(invocation, plugin, phase, correlationId).thenRun(() -> {
+        return hookOnly(invocation, plugin).thenRun(() -> {
             plugin.failures.set(0);
             plugin.successfulHooks.incrementAndGet();
             plugin.transition(success, correlationId, phase + " hook complete");
@@ -396,23 +390,13 @@ public final class PluginLifecycleCoordinator {
 
     private CompletionStage<Void> hookOnly(
             Supplier<CompletionStage<Void>> invocation,
-            ManagedPlugin plugin,
-            PluginLifecycleState phase,
-            UUID correlationId) {
+            ManagedPlugin plugin) {
         plugin.operations.incrementAndGet();
         try {
-            return timed(invocation.get(), plugin, phase, correlationId).thenApply(ignored -> null);
+            return Objects.requireNonNull(invocation.get(), "lifecycle hook returned null").thenApply(ignored -> null);
         } catch (RuntimeException exception) {
             return CompletableFuture.failedFuture(exception);
         }
-    }
-
-    private <T> CompletionStage<T> timed(
-            CompletionStage<T> stage,
-            ManagedPlugin plugin,
-            PluginLifecycleState phase,
-            UUID correlationId) {
-        return timed(stage, plugin, phase, correlationId, hookTimeout);
     }
 
     private <T> CompletionStage<T> timed(
@@ -467,15 +451,6 @@ public final class PluginLifecycleCoordinator {
         return result;
     }
 
-    private void cleanupLateRuntime(ManagedPlugin plugin, PluginRuntime runtime) {
-        try {
-            CompletionStage<Void> cleanup = Objects.requireNonNull(runtime.unload(), "unload hook result");
-            cleanup.whenComplete((ignored, failure) -> plugin.resources.cleanup(plugin.candidate.pluginId()));
-        } catch (RuntimeException exception) {
-            plugin.resources.cleanup(plugin.candidate.pluginId());
-        }
-    }
-
     private CompletionStage<Void> doReplace(InstalledPluginCandidate candidate, UUID correlationId) {
         ManagedPlugin active = plugin(candidate.pluginId());
         if (active.machine.state() != PluginLifecycleState.READY) {
@@ -498,7 +473,7 @@ public final class PluginLifecycleCoordinator {
         return doLoad(staged, correlationId)
                 .thenCompose(ignored -> doEnable(staged, correlationId, next))
                 .thenCompose(ignored -> doReady(staged, correlationId, false))
-                .thenCompose(ignored -> migrateState(active, staged, correlationId))
+                .thenCompose(ignored -> migrateState(active, staged))
                 .thenCompose(ignored -> disableReloadDependents(reloadDependents, correlationId))
                 .thenCompose(ignored -> doDisable(active, correlationId))
                 .thenRun(() -> {
@@ -529,7 +504,7 @@ public final class PluginLifecycleCoordinator {
                                         original.addSuppressed(unwrap(recoveryFailure));
                                     }
                                     return original;
-                                }).thenCompose(original -> discardCandidate(staged, correlationId, original)));
+                                }).thenCompose(original -> discardCandidate(staged, original)));
     }
 
     private CompletionStage<Void> cleanupAfterSwap(
@@ -570,8 +545,7 @@ public final class PluginLifecycleCoordinator {
         }
     }
 
-    private CompletionStage<Void> migrateState(
-            ManagedPlugin active, ManagedPlugin staged, UUID correlationId) {
+    private CompletionStage<Void> migrateState(ManagedPlugin active, ManagedPlugin staged) {
         if (!staged.candidate.descriptor().reload().preserveState()
                 || !(active.runtime instanceof HotStatePluginRuntime source)
                 || !(staged.runtime instanceof HotStatePluginRuntime target)) {
@@ -579,11 +553,11 @@ public final class PluginLifecycleCoordinator {
         }
         active.operations.incrementAndGet();
         staged.operations.incrementAndGet();
-        return timed(source.exportHotState(), active, PluginLifecycleState.READY, correlationId)
+        return Objects.requireNonNull(source.exportHotState(), "export hot state returned null")
                 .thenCompose(state -> {
                     byte[] snapshot = Objects.requireNonNull(state, "exported hot state").clone();
-                    return timed(target.importHotState(snapshot), staged,
-                            PluginLifecycleState.READY, correlationId);
+                    return Objects.requireNonNull(
+                            target.importHotState(snapshot), "import hot state returned null");
                 });
     }
 
@@ -609,14 +583,12 @@ public final class PluginLifecycleCoordinator {
         return sequence;
     }
 
-    private CompletionStage<Void> discardCandidate(
-            ManagedPlugin staged, UUID correlationId, Throwable original) {
+    private CompletionStage<Void> discardCandidate(ManagedPlugin staged, Throwable original) {
         staged.invocations.stop();
         CompletionStage<Void> unload;
         try {
             unload = staged.runtime == null ? completed()
-                    : timed(Objects.requireNonNull(staged.runtime.unload(), "unload hook result"),
-                            staged, PluginLifecycleState.UNLOADING, correlationId);
+                    : Objects.requireNonNull(staged.runtime.unload(), "unload hook result");
         } catch (RuntimeException exception) {
             unload = CompletableFuture.failedFuture(exception);
         }

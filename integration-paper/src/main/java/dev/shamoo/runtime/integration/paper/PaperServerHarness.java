@@ -40,14 +40,14 @@ public final class PaperServerHarness {
         Path scriptPlugins = pluginData.resolve("scripts");
         deleteTree(scriptPlugins);
         Files.createDirectories(scriptPlugins);
-        createScriptPlugin(scriptPlugins, "fixture-one");
-        createScriptPlugin(scriptPlugins, "fixture-two");
-        createScriptPlugin(scriptPlugins, "corrupt");
+        createScriptPlugin(scriptPlugins, "fixture-one", true);
+        createScriptPlugin(scriptPlugins, "fixture-two", false);
+        createScriptPlugin(scriptPlugins, "corrupt", false);
         Files.writeString(scriptPlugins.resolve("corrupt/index.js.map"), "{\"version\":2}",
                 StandardCharsets.UTF_8);
         Files.writeString(pluginData.resolve("config.yml"), "plugins:\n  directory: scripts\n"
                 + "  stability-millis: 0\n  watch-debounce-millis: 100\n"
-                + "  hook-timeout-millis: 5000\n  drain-timeout-millis: 5000\n"
+                + "  drain-timeout-millis: 5000\n"
                 + "packets:\n  enabled: true\n"
                 + "  process-smoke: true\n  allowed-plugins: [shamooruntime]\n"
                 + "  timeout-millis: 1000\n  maximum-pending: 32\n",
@@ -93,21 +93,38 @@ public final class PaperServerHarness {
         }
     }
 
-    private static void createScriptPlugin(Path plugins, String name) throws IOException {
+    private static void createScriptPlugin(Path plugins, String name, boolean startupCommand) throws IOException {
         Path root = plugins.resolve(name);
         Files.createDirectories(root);
-        Files.writeString(root.resolve("index.js"), "export default Object.freeze({enable(){"
-                + "console.log('SHAMOO_FIXTURE_LIFECYCLE " + name + "')}});\n", StandardCharsets.UTF_8);
+        String source = startupCommand ? """
+                export async function load() {
+                  host.registerCallback('process-startup-command', () => true);
+                  await host.paperRegisterCommand({namespace:'paper',typeName:'paperRegisterCommand',
+                    componentId:'process-fixture',method:'startupCommand',protocolMajor:1,protocolMinor:0},
+                    'shamoo-process', [], {syntax:'',description:'Process startup regression command',
+                    permission:'',sender:'any',arguments:[],options:[]},
+                    {$callback:'process-startup-command'});
+                  console.log('SHAMOO_FIXTURE_LIFECYCLE PLUGIN_NAME');
+                }
+                """.replace("PLUGIN_NAME", name) : "export default Object.freeze({enable(){"
+                + "console.log('SHAMOO_FIXTURE_LIFECYCLE " + name + "')}});\n";
+        Files.writeString(root.resolve("index.js"), source, StandardCharsets.UTF_8);
         Files.writeString(root.resolve("index.js.map"),
                 "{\"version\":3,\"sources\":[\"src/plugin.ts\"],\"mappings\":\"AAAA\"}",
                 StandardCharsets.UTF_8);
-        Files.writeString(root.resolve("shamoo-plugin.json"), manifest(name), StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("shamoo-plugin.json"), manifest(name, startupCommand), StandardCharsets.UTF_8);
     }
 
-    private static String manifest(String name) {
+    private static String manifest(String name, boolean startupCommand) {
         String platforms = "\"paper\":{\"enabled\":true,\"minecraft\":\"1.21.x\","
                 + "\"paperApi\":\"1.21.x\",\"nms\":false,\"packets\":false},"
                 + "\"velocity\":{\"enabled\":false}";
+        String components = startupCommand ? "[{\"id\":\"process-fixture\",\"kind\":\"command\","
+                + "\"name\":\"ProcessFixture\",\"file\":\"src/plugin.ts\",\"platform\":\"paper\","
+                + "\"decorators\":[],\"constructor\":[],\"properties\":[],\"methods\":[{"
+                + "\"name\":\"startupCommand\",\"invocation\":\"command\",\"decorators\":[],"
+                + "\"parameters\":[],\"location\":{\"file\":\"src/plugin.ts\",\"line\":1,\"column\":1}}],"
+                + "\"location\":{\"file\":\"src/plugin.ts\",\"line\":1,\"column\":1}}]" : "[]";
         return "{\"name\":\"" + name + "\",\"displayName\":\"" + name + "\",\"version\":\"1.0.0\","
                 + "\"shamoo\":{\"api\":\"^0.1.0\",\"runtime\":\"^0.1.0\",\"manifest\":2},"
                 + "\"platforms\":{" + platforms + "},\"dependencies\":{\"required\":{},\"optional\":{},"
@@ -115,7 +132,7 @@ public final class PaperServerHarness {
                 + "\"read\":[],\"write\":[]},\"network\":false,\"workers\":false,\"childProcess\":false,"
                 + "\"nativeAddons\":false},\"reload\":{\"watch\":true,\"debounceMs\":100,"
                 + "\"preserveState\":true},\"compiler\":{\"version\":\"process-fixture\","
-                + "\"components\":[],\"modules\":[],\"communication\":{\"services\":[],"
+                + "\"components\":" + components + ",\"modules\":[],\"communication\":{\"services\":[],"
                 + "\"events\":[],\"consumers\":[]}}}";
     }
 
