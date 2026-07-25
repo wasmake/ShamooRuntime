@@ -41,8 +41,11 @@ operations are denied where the provider cannot supply secure directory streams.
 x86-64 Node native artifact; additional operating systems and CPU architectures require explicit distribution
 variants rather than runtime guessing. See [`runtime.md`](runtime.md) and ADR 0003.
 
-Runtime plugin directories are inventoried only after a stable-file window. Strict descriptors and SHA-256 inventories
-form immutable installed candidates. A deterministic dependency graph controls enable and reverse-disable order.
+Runtime plugin directories are inventoried only after a stable-file window. A candidate has exactly `index.js`,
+`index.js.map`, and `shamoo-plugin.json`; strict manifest v2 descriptors and three-file SHA-256 inventories form
+immutable installed candidates. The manifest embeds compiler metadata, while root identity, Node policy, and Paper
+NMS/packet flags remain their sole authorization sources. A deterministic dependency graph controls enable and
+reverse-disable order.
 Lifecycle calls are serialized per plugin, active invocations drain before disable, and typed plugin-owned resources
 clean up in reverse order. Stable candidate changes can prepare, migrate, and atomically publish an isolated runtime
 generation without exposing failed candidates. See [`lifecycle.md`](lifecycle.md) and ADR 0004.

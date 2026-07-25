@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.shamoo.runtime.protocol.ManifestCodec;
+import dev.shamoo.runtime.protocol.PluginArtifactProtocol;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -34,20 +35,22 @@ class PluginDiscoveryTest {
         assertTrue(result.errors().isEmpty());
         assertEquals(List.of(new PluginId("alpha"), new PluginId("bravo")),
                 result.candidates().stream().map(InstalledPluginCandidate::pluginId).toList());
-        assertEquals(64, result.candidates().getFirst().checksums().get("index.mjs").length());
-        assertTrue(result.candidates().getFirst().checksums().containsKey(PluginDiscovery.DESCRIPTOR_FILE));
+        assertEquals(PluginArtifactProtocol.REQUIRED_FILES,
+                result.candidates().getFirst().checksums().keySet());
+        assertEquals(64, result.candidates().getFirst().checksums()
+                .get(PluginArtifactProtocol.MODULE_FILE).length());
     }
 
     @Test
     void rejectsStrictDescriptorErrorsAndAllDuplicateIdentities() throws IOException {
         Path first = createCandidate("one", "duplicate");
         createCandidate("two", "duplicate");
-        Files.writeString(first.resolve(PluginDiscovery.DESCRIPTOR_FILE), descriptor("duplicate") + " trailing");
+        Files.writeString(first.resolve(PluginArtifactProtocol.MANIFEST_FILE), descriptor("duplicate") + " trailing");
         PluginDiscoveryResult malformed = new PluginDiscovery(Duration.ZERO).discover(temporaryDirectory);
         assertEquals(1, malformed.candidates().size());
         assertEquals("descriptor_invalid", malformed.errors().getFirst().code());
 
-        Files.writeString(first.resolve(PluginDiscovery.DESCRIPTOR_FILE), descriptor("duplicate"));
+        Files.writeString(first.resolve(PluginArtifactProtocol.MANIFEST_FILE), descriptor("duplicate"));
         PluginDiscoveryResult duplicate = new PluginDiscovery(Duration.ZERO).discover(temporaryDirectory);
         assertTrue(duplicate.candidates().isEmpty());
         assertEquals("duplicate_plugin_id", duplicate.errors().getFirst().code());
@@ -73,7 +76,7 @@ class PluginDiscoveryTest {
     @Test
     void rejectsFilesThatChangeInsideStabilityWindow() throws Exception {
         Path candidate = createCandidate("moving", "moving");
-        Path source = candidate.resolve("index.mjs");
+        Path source = candidate.resolve(PluginArtifactProtocol.MODULE_FILE);
         CountDownLatch started = new CountDownLatch(1);
         Thread writer = Thread.ofPlatform().start(() -> {
             try {
@@ -96,12 +99,30 @@ class PluginDiscoveryTest {
         Path source = createCandidate("source", "snapshot");
         InstalledPluginCandidate candidate = new PluginDiscovery(Duration.ZERO)
                 .discover(temporaryDirectory).candidates().getFirst();
-        Files.writeString(source.resolve("index.mjs"), "mutated", StandardCharsets.UTF_8);
-        Files.writeString(source.resolve(PluginDiscovery.DESCRIPTOR_FILE), descriptor("changed"));
+        Files.writeString(source.resolve(PluginArtifactProtocol.MODULE_FILE), "mutated", StandardCharsets.UTF_8);
+        Files.writeString(source.resolve(PluginArtifactProtocol.MANIFEST_FILE), descriptor("changed"));
 
         assertNotEquals(source, candidate.root());
-        assertEquals("export default 'snapshot';", Files.readString(candidate.root().resolve("index.mjs")));
+        assertEquals("export default 'snapshot';",
+                Files.readString(candidate.root().resolve(PluginArtifactProtocol.MODULE_FILE)));
         assertEquals("snapshot", candidate.descriptor().name());
+    }
+
+    @Test
+    void rejectsMissingExtraAndNestedArtifactEntries() throws IOException {
+        Path missing = createCandidate("missing", "missing");
+        Files.delete(missing.resolve(PluginArtifactProtocol.SOURCE_MAP_FILE));
+        Path extra = createCandidate("extra", "extra");
+        Files.writeString(extra.resolve("README.md"), "extra");
+        Path nested = createCandidate("nested", "nested");
+        Files.createDirectory(nested.resolve("dist"));
+        Files.writeString(nested.resolve("dist/other.js"), "export {};");
+
+        PluginDiscoveryResult result = new PluginDiscovery(Duration.ZERO).discover(temporaryDirectory);
+
+        assertTrue(result.candidates().isEmpty());
+        assertEquals(3, result.errors().size());
+        assertTrue(result.errors().stream().allMatch(error -> error.code().equals("invalid_candidate_layout")));
     }
 
     @Test
@@ -111,8 +132,10 @@ class PluginDiscoveryTest {
 
     private Path createCandidate(String directory, String id) throws IOException {
         Path root = Files.createDirectory(temporaryDirectory.resolve(directory));
-        Files.writeString(root.resolve(PluginDiscovery.DESCRIPTOR_FILE), descriptor(id));
-        Files.writeString(root.resolve("index.mjs"), "export default '" + id + "';");
+        Files.writeString(root.resolve(PluginArtifactProtocol.MANIFEST_FILE), descriptor(id));
+        Files.writeString(root.resolve(PluginArtifactProtocol.MODULE_FILE), "export default '" + id + "';");
+        Files.writeString(root.resolve(PluginArtifactProtocol.SOURCE_MAP_FILE),
+                "{\"version\":3,\"sources\":[\"src/plugin.ts\"],\"mappings\":\"AAAA\"}");
         return root;
     }
 

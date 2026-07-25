@@ -77,17 +77,19 @@ class JavetScriptRuntimeTest {
     @Test
     void exposesOnlyMetadataCheckedPlatformCapabilities() throws RuntimeInitializationException {
         PlatformCapabilities capabilities = new PlatformCapabilities("paper", Map.of("registerEvent",
-                (owner, metadata, arguments) -> owner + ":" + metadata.typeName() + ":" + arguments.getFirst()));
+                (owner, metadata, arguments) -> owner + ":" + metadata.method() + ":" + arguments.getFirst()));
         try (JavetScriptRuntime runtime = new JavetScriptRuntime(
                 host, new PluginId("fixture"), capabilities)) {
             ScriptResult accepted = execute(runtime, "capability", "host.registerEvent({namespace: 'paper', "
-                    + "typeName: 'JoinEvent', protocolMajor: 1, protocolMinor: 0}, 'ok')").join();
+                    + "typeName: 'registerEvent', componentId: 'listener', method: 'onJoin', "
+                    + "protocolMajor: 1, protocolMinor: 0}, 'ok')").join();
             ScriptResult rejected = execute(runtime, "raw-capability", "host.registerEvent('raw')").join();
 
-            assertEquals("fixture:JoinEvent:ok", accepted.value());
+            assertEquals("fixture:onJoin:ok", accepted.value());
             assertEquals(ScriptResult.Status.FAILURE, rejected.status());
             ScriptResult wrongNamespace = execute(runtime, "wrong-namespace",
-                    "host.registerEvent({namespace: 'velocity', typeName: 'JoinEvent', "
+                    "host.registerEvent({namespace: 'velocity', typeName: 'registerEvent', "
+                            + "componentId: 'listener', method: 'onJoin', "
                             + "protocolMajor: 1, protocolMinor: 0}, 'bad')").join();
             assertEquals(ScriptResult.Status.FAILURE, wrongNamespace.status());
         }

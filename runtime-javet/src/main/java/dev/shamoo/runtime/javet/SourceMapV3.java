@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.shamoo.runtime.core.SourcePosition;
+import dev.shamoo.runtime.protocol.PluginArtifactProtocol;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -22,13 +23,26 @@ final class SourceMapV3 {
     private SourceMapV3() {
     }
 
-    static CompletionStage<Void> registerAdjacent(ShamooNodeRuntime runtime, Path root, String entrypoint) {
-        Path map = root.resolve(entrypoint + ".map").normalize();
+    static ValidatedSourceMap validateAdjacent(Path root) {
+        return new ValidatedSourceMap(parseAdjacent(root));
+    }
+
+    static CompletionStage<Void> registerAdjacent(ShamooNodeRuntime runtime, Path root) {
+        try {
+            return validateAdjacent(root).register(runtime);
+        } catch (RuntimeException exception) {
+            return CompletableFuture.failedFuture(exception);
+        }
+    }
+
+    private static List<Mapping> parseAdjacent(Path root) {
+        String entrypoint = PluginArtifactProtocol.MODULE_FILE;
+        Path map = root.resolve(PluginArtifactProtocol.SOURCE_MAP_FILE).normalize();
         if (!map.startsWith(root) || !Files.exists(map)) {
-            return CompletableFuture.completedFuture(null);
+            throw new IllegalArgumentException("source map is missing: " + PluginArtifactProtocol.SOURCE_MAP_FILE);
         }
         if (!Files.isRegularFile(map)) {
-            return CompletableFuture.failedFuture(new IllegalArgumentException("source map is not a regular file"));
+            throw new IllegalArgumentException("source map is not a regular file");
         }
         try {
             JsonNode value = MAPPER.readTree(Files.readString(map, StandardCharsets.UTF_8));
@@ -37,28 +51,24 @@ final class SourceMapV3 {
                     || !value.path("sources").isArray() || !value.path("mappings").isTextual()) {
                 throw new IllegalArgumentException("adjacent source map must be source-map v3");
             }
+            String sourceRoot = value.path("sourceRoot").isTextual() ? value.path("sourceRoot").textValue() : "";
             List<String> sources = new ArrayList<>();
             for (JsonNode source : value.path("sources")) {
                 if (!source.isTextual() || source.textValue().isBlank()) {
                     throw new IllegalArgumentException("source map sources must be non-blank strings");
                 }
-                String sourceRoot = value.path("sourceRoot").isTextual() ? value.path("sourceRoot").textValue() : "";
                 sources.add(normalizeSource(Path.of(entrypoint).getParent(), sourceRoot, source.textValue()));
             }
-            List<CompletableFuture<Void>> registrations = decode(runtime, entrypoint,
-                    value.path("mappings").textValue(), sources);
-            return CompletableFuture.allOf(registrations.toArray(CompletableFuture[]::new));
+            return decode(entrypoint, value.path("mappings").textValue(), sources);
         } catch (JsonProcessingException exception) {
-            return CompletableFuture.failedFuture(
-                    new IllegalArgumentException("adjacent source map is malformed", exception));
-        } catch (IOException | RuntimeException exception) {
-            return CompletableFuture.failedFuture(exception);
+            throw new IllegalArgumentException("adjacent source map is malformed", exception);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("unable to read adjacent source map", exception);
         }
     }
 
-    private static List<CompletableFuture<Void>> decode(ShamooNodeRuntime runtime, String generated,
-            String mappings, List<String> sources) {
-        List<CompletableFuture<Void>> result = new ArrayList<>();
+    private static List<Mapping> decode(String generated, String mappings, List<String> sources) {
+        List<Mapping> result = new ArrayList<>();
         int sourceIndex = 0;
         int sourceLine = 0;
         int sourceColumn = 0;
@@ -74,6 +84,9 @@ final class SourceMapV3 {
                 }
                 int[] cursor = {0};
                 generatedColumn += vlq(segment, cursor);
+                if (generatedColumn < 0) {
+                    throw new IllegalArgumentException("source map generated column is out of range");
+                }
                 if (cursor[0] == segment.length()) {
                     continue;
                 }
@@ -83,7 +96,7 @@ final class SourceMapV3 {
                 if (sourceIndex < 0 || sourceIndex >= sources.size() || sourceLine < 0 || sourceColumn < 0) {
                     throw new IllegalArgumentException("source map mapping is out of range");
                 }
-                result.add(runtime.registerSourceMap(
+                result.add(new Mapping(
                         new SourcePosition(generated, generatedLine + 1, generatedColumn + 1),
                         new SourcePosition(sources.get(sourceIndex), sourceLine + 1, sourceColumn + 1)));
                 if (cursor[0] < segment.length()) {
@@ -94,7 +107,7 @@ final class SourceMapV3 {
                 }
             }
         }
-        return result;
+        return List.copyOf(result);
     }
 
     private static int vlq(String value, int[] cursor) {
@@ -127,5 +140,22 @@ final class SourceMapV3 {
             base = base.resolve(root.replace('\\', '/'));
         }
         return base.resolve(source.replace('\\', '/')).normalize().toString().replace('\\', '/');
+    }
+
+    private record Mapping(SourcePosition generated, SourcePosition original) {
+    }
+
+    static final class ValidatedSourceMap {
+        private final List<Mapping> mappings;
+
+        private ValidatedSourceMap(List<Mapping> mappings) {
+            this.mappings = List.copyOf(mappings);
+        }
+
+        CompletionStage<Void> register(ShamooNodeRuntime runtime) {
+            List<CompletableFuture<Void>> registrations = mappings.stream()
+                    .map(mapping -> runtime.registerSourceMap(mapping.generated(), mapping.original())).toList();
+            return CompletableFuture.allOf(registrations.toArray(CompletableFuture[]::new));
+        }
     }
 }

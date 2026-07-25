@@ -4,7 +4,7 @@ import java.util.Objects;
 
 /** Shamoo API, runtime, and manifest protocol accepted by a plugin. */
 public record ShamooRequirements(SemverRange api, SemverRange runtime, int manifest) {
-    public static final int CURRENT_MANIFEST_VERSION = 1;
+    public static final int CURRENT_MANIFEST_VERSION = 2;
 
     public ShamooRequirements {
         api = Objects.requireNonNull(api, "api");

@@ -38,17 +38,28 @@ public final class PlatformCapabilities {
     /** Resolves and caches only immutable generated identity; plugin owners and runtimes are invocation arguments. */
     public Object invoke(String operationName, PluginId owner, Map<?, ?> metadata, List<Object> arguments)
             throws Exception {
+        return invoke(operationName, owner, CompiledBindingMetadata.from(metadata), arguments);
+    }
+
+    /** Invokes a capability using metadata that was already parsed by the authorization layer. */
+    public Object invoke(String operationName, PluginId owner, CompiledBindingMetadata metadata,
+            List<Object> arguments) throws Exception {
         Operation operation = bindings.get(operationName);
         if (operation == null) {
             throw new IllegalArgumentException("unknown platform capability: " + operationName);
         }
-        InvocationKey key = InvocationKey.from(operationName, metadata);
-        if (!namespace.equals(key.namespace())) {
+        Objects.requireNonNull(metadata, "metadata");
+        if (!operationName.equals(metadata.typeName())) {
+            throw new IllegalArgumentException("platform capability " + operationName
+                    + " requires matching generated typeName");
+        }
+        if (!namespace.equals(metadata.namespace())) {
             throw new IllegalArgumentException("platform capability " + operationName
                     + " requires generated namespace " + namespace);
         }
+        InvocationKey key = new InvocationKey(operationName, metadata);
         InvocationAdapter adapter = adapters.computeIfAbsent(key,
-                ignored -> new InvocationAdapter(operation, key.metadata()));
+                ignored -> new InvocationAdapter(operation, metadata));
         return adapter.invoke(Objects.requireNonNull(owner, "owner"), arguments);
     }
 
@@ -63,17 +74,7 @@ public final class PlatformCapabilities {
         return value;
     }
 
-    private record InvocationKey(String operationName, String namespace, String typeName,
-            dev.shamoo.runtime.protocol.ProtocolVersion protocolVersion) {
-        private static InvocationKey from(String operationName, Map<?, ?> value) {
-            CompiledBindingMetadata metadata = CompiledBindingMetadata.from(value);
-            return new InvocationKey(operationName, metadata.namespace(), metadata.typeName(),
-                    metadata.protocolVersion());
-        }
-
-        private CompiledBindingMetadata metadata() {
-            return new CompiledBindingMetadata(namespace, typeName, protocolVersion);
-        }
+    private record InvocationKey(String operationName, CompiledBindingMetadata metadata) {
     }
 
     private record InvocationAdapter(Operation operation, CompiledBindingMetadata metadata) {

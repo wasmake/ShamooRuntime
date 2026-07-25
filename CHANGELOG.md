@@ -5,6 +5,15 @@ Versioning after its first release.
 
 ## Unreleased
 
+### Changed
+
+- Replaced manifest v1 and separate compiler metadata with strict manifest v2, including required embedded compiler
+  components, modules, and communication contracts.
+- Plugin candidates now contain exactly `index.js`, `index.js.map`, and `shamoo-plugin.json`; Javet always executes the
+  fixed ESM bundle with its mandatory adjacent source map.
+- Platform targets no longer declare entrypoints. Paper targets now own the sole NMS and packet authorization flags,
+  root `node` remains the sole Node permission source, and lifecycle identity comes from root `name`.
+
 ## 0.1.0-rc.1 - 2026-07-24
 
 ### Added

@@ -5,15 +5,17 @@ engine-neutral. Runtime
 implementations enter through `PluginRuntimeFactory` and `PluginRuntime`; `runtime-core` does not import Javet or a
 platform API. `JavetPluginHost` is the production composition root used by both bootstraps; it owns compatibility
 admission, discovery, watcher transactions, administration, coordinator, and all generation-keyed runtimes.
-`JavetPluginRuntime` loads the selected platform entrypoint and invokes lifecycle and bounded hot-state hooks.
+`JavetPluginRuntime` loads the fixed universal `index.js` ES module and invokes lifecycle and bounded hot-state hooks.
 
 ## Discovery and candidates
 
 `PluginDiscovery` inventories direct child directories of the configured runtime plugins directory. Every candidate
-must contain `shamoo-plugin.json`. Parsing uses the strict manifest codec, and the resulting descriptor name is the
-plugin identity. Discovery rejects symbolic links, path escapes, special files, malformed descriptors, unstable file
-sets, and every candidate involved in a duplicate identity. It reads metadata and SHA-256 content checksums twice,
-separated by the configured stability window. Inventory paths and output ordering are deterministic.
+must contain exactly the direct regular files `index.js`, `index.js.map`, and `shamoo-plugin.json`, with no directories,
+symbolic links, or extras. Parsing uses the strict manifest codec, and the resulting descriptor name is the plugin
+identity. Compiler metadata is embedded at `descriptor.compiler`; discovery never reads a second descriptor file.
+Discovery also rejects path escapes, special files, malformed descriptors, unstable file sets, and every candidate
+involved in a duplicate identity. It reads file attributes, content, and SHA-256 inventory checksums twice, separated
+by the configured stability window. Exactly the three protocol files are staged, and ordering is deterministic.
 
 An `InstalledPluginCandidate` is an immutable descriptor, canonical root, identity, and checksum inventory. A
 `PluginStager` prepares that model below a staging root. `stageAndReplace` never loads the mutable source directory;

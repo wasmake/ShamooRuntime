@@ -2,7 +2,7 @@ package dev.shamoo.runtime.protocol;
 
 import java.util.Objects;
 
-/** Canonical immutable Shamoo plugin manifest version 1. */
+/** Canonical immutable Shamoo plugin manifest version 2. */
 public record PluginDescriptor(
         String name,
         String displayName,
@@ -11,7 +11,8 @@ public record PluginDescriptor(
         PlatformTargets platforms,
         DependencyPolicy dependencies,
         NodePolicy node,
-        ReloadPolicy reload) {
+        ReloadPolicy reload,
+        CompilerMetadata compiler) {
     public PluginDescriptor {
         name = ManifestValidation.pluginId(name, "/name");
         displayName = ManifestValidation.text(displayName, "/displayName");
@@ -21,5 +22,7 @@ public record PluginDescriptor(
         dependencies = Objects.requireNonNull(dependencies, "dependencies");
         node = Objects.requireNonNull(node, "node");
         reload = Objects.requireNonNull(reload, "reload");
+        compiler = Objects.requireNonNull(compiler, "compiler");
+        compiler.validatePlatforms(platforms);
     }
 }

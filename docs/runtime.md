@@ -14,6 +14,10 @@ does not expose a stable active-libuv-handle count, so this runtime does not est
 
 ## Execution
 
+- Lifecycle execution always registers the staged `index.js` as ESM. Targets do not select an entrypoint or module
+  kind, and the adjacent `index.js.map` source-map v3 file is mandatory.
+- The lifecycle context uses root manifest `name` for `plugin`. `host.shamooMetadata()` returns exactly the embedded
+  root `compiler` object; no runtime metadata file is read.
 - `evaluate()` executes a named script and converts its result to a Java value.
 - A returned promise is pumped on the owner thread with Javet's Node `await()` API until fulfilled or rejected.
 - Zero-delay timers and Node tasks execute through the real Node event loop, not a Java timer simulation.
@@ -59,6 +63,9 @@ admission, permission, and module errors remain exceptional completions for call
 `RuntimePermissions` is an immutable canonical projection of manifest `NodePolicy`. Builtin aliases are normalized to
 `node:*`; filesystem entries remain plugin-root-relative. The implemented boundaries are deliberately narrower than
 the manifest model:
+
+Node permission decisions use only root `node`. Paper NMS and packet decisions use only the selected Paper target's
+`nms` and `packets` booleans; compiler metadata does not duplicate either policy.
 
 | Capability | Runtime behavior |
 | --- | --- |

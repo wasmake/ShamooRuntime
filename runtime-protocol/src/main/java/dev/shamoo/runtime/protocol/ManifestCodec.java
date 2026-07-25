@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import java.util.Objects;
 
@@ -16,7 +17,11 @@ public final class ManifestCodec {
     public static final int MAX_MANIFEST_BYTES = 1_048_576;
     private static final String DEPENDENCIES = "dependencies";
     private static final String ENABLED = "enabled";
-    private static final String ENTRYPOINT = "entrypoint";
+    private static final String PAPER = "paper";
+    private static final String PAPER_PATH = "/platforms/paper";
+    private static final String PLATFORMS = "platforms";
+    private static final String VELOCITY = "velocity";
+    private static final String VELOCITY_PATH = "/platforms/velocity";
     private static final ObjectMapper MAPPER = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
@@ -51,11 +56,22 @@ public final class ManifestCodec {
     public String serialize(PluginDescriptor descriptor) {
         Objects.requireNonNull(descriptor, "descriptor");
         try {
-            return MAPPER.writeValueAsString(descriptor);
+            ObjectNode root = MAPPER.valueToTree(descriptor);
+            ObjectNode platforms = (ObjectNode) root.path(PLATFORMS);
+            removeDisabledFields((ObjectNode) platforms.path(PAPER));
+            removeDisabledFields((ObjectNode) platforms.path(VELOCITY));
+            return MAPPER.writeValueAsString(root);
         } catch (JsonProcessingException exception) {
             ProtocolDiagnostic diagnostic = new ProtocolDiagnostic(
                     "manifest_serialization_failed", "", "could not serialize plugin descriptor");
             throw new ManifestSerializationException(diagnostic, exception);
+        }
+    }
+
+    private static void removeDisabledFields(ObjectNode target) {
+        if (!target.path(ENABLED).asBoolean()) {
+            target.removeAll();
+            target.put(ENABLED, false);
         }
     }
 
@@ -71,27 +87,40 @@ public final class ManifestCodec {
     }
 
     private static void verifyRequiredFields(JsonNode root) {
-        require(root, "", "name", "displayName", "version", "shamoo", "platforms", DEPENDENCIES, "node", "reload");
+        require(root, "", "name", "displayName", "version", "shamoo", PLATFORMS, DEPENDENCIES, "node", "reload",
+                "compiler");
         require(root.path("shamoo"), "/shamoo", "api", "runtime", "manifest");
-        JsonNode platforms = root.path("platforms");
-        require(platforms, "/platforms", "paper", "velocity");
-        JsonNode paper = platforms.path("paper");
-        JsonNode velocity = platforms.path("velocity");
-        require(paper, "/platforms/paper", ENABLED);
-        require(velocity, "/platforms/velocity", ENABLED);
-        rejectNullWhenPresent(paper, "/platforms/paper", ENTRYPOINT, "minecraft", "paperApi");
-        rejectNullWhenPresent(velocity, "/platforms/velocity", ENTRYPOINT, "velocityApi");
+        JsonNode platforms = root.path(PLATFORMS);
+        require(platforms, "/platforms", PAPER, VELOCITY);
+        JsonNode paper = platforms.path(PAPER);
+        JsonNode velocity = platforms.path(VELOCITY);
+        require(paper, PAPER_PATH, ENABLED);
+        require(velocity, VELOCITY_PATH, ENABLED);
+        rejectNullWhenPresent(paper, PAPER_PATH, "minecraft", "paperApi", "nms", "packets");
+        rejectNullWhenPresent(velocity, VELOCITY_PATH, "velocityApi");
         if (paper.path(ENABLED).isBoolean() && paper.path(ENABLED).booleanValue()) {
-            require(paper, "/platforms/paper", ENTRYPOINT, "minecraft", "paperApi");
+            require(paper, PAPER_PATH, "minecraft", "paperApi", "nms", "packets");
+        } else if (paper.path(ENABLED).isBoolean()) {
+            requireOnly(paper, PAPER_PATH, ENABLED);
         }
         if (velocity.path(ENABLED).isBoolean() && velocity.path(ENABLED).booleanValue()) {
-            require(velocity, "/platforms/velocity", ENTRYPOINT, "velocityApi");
+            require(velocity, VELOCITY_PATH, "velocityApi");
+        } else if (velocity.path(ENABLED).isBoolean()) {
+            requireOnly(velocity, VELOCITY_PATH, ENABLED);
         }
         require(root.path(DEPENDENCIES), "/dependencies", "required", "optional", "loadBefore", "loadAfter");
         require(root.path("node"), "/node", "builtins", "filesystem", "network", "workers",
                 "childProcess", "nativeAddons");
         require(root.path("node").path("filesystem"), "/node/filesystem", "read", "write");
         require(root.path("reload"), "/reload", "watch", "debounceMs", "preserveState");
+    }
+
+    private static void requireOnly(JsonNode node, String path, String name) {
+        if (node.size() != 1 || !node.has(name)) {
+            ProtocolDiagnostic diagnostic = new ProtocolDiagnostic(
+                    "invalid_disabled_target", path, "disabled target may contain only enabled=false");
+            throw new ManifestParseException(diagnostic, null);
+        }
     }
 
     private static void require(JsonNode node, String path, String... names) {
@@ -120,11 +149,11 @@ public final class ManifestCodec {
         validateRange(shamoo.path("api"), "/shamoo/api");
         validateRange(shamoo.path("runtime"), "/shamoo/runtime");
 
-        JsonNode platforms = root.path("platforms");
-        JsonNode paper = platforms.path("paper");
-        validateRange(paper.path("minecraft"), "/platforms/paper/minecraft");
-        validateRange(paper.path("paperApi"), "/platforms/paper/paperApi");
-        validateRange(platforms.path("velocity").path("velocityApi"), "/platforms/velocity/velocityApi");
+        JsonNode platforms = root.path(PLATFORMS);
+        JsonNode paper = platforms.path(PAPER);
+        validateRange(paper.path("minecraft"), PAPER_PATH + "/minecraft");
+        validateRange(paper.path("paperApi"), PAPER_PATH + "/paperApi");
+        validateRange(platforms.path(VELOCITY).path("velocityApi"), VELOCITY_PATH + "/velocityApi");
 
         validateDependencyRanges(root.path(DEPENDENCIES).path("required"), "/dependencies/required");
         validateDependencyRanges(root.path(DEPENDENCIES).path("optional"), "/dependencies/optional");
