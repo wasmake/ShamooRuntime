@@ -7,9 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
-@SuppressWarnings({"PMD.UnitTestContainsTooManyAsserts", "PMD.UnitTestAssertionsShouldIncludeMessage"})
+@SuppressWarnings({"PMD.CloseResource", "PMD.UnitTestContainsTooManyAsserts",
+        "PMD.UnitTestAssertionsShouldIncludeMessage"})
 class ResourceRegistryTest {
     @Test
     void cleansOneOwnerInReverseOrderAndIsIdempotent() {
@@ -57,6 +60,31 @@ class ResourceRegistryTest {
             registry.register(owner, category, category.name(), () -> { });
         }
         assertEquals(Set.copyOf(List.of(ResourceCategory.values())), registry.snapshot(owner).stream()
-                .map(ResourceRegistration::category).collect(java.util.stream.Collectors.toUnmodifiableSet()));
+                 .map(ResourceRegistration::category).collect(java.util.stream.Collectors.toUnmodifiableSet()));
+    }
+
+    @Test
+    void forgetsNaturallyClosedResourcesWithoutClosingThemAgain() throws Exception {
+        ResourceRegistry registry = new ResourceRegistry();
+        AtomicBoolean closed = new AtomicBoolean();
+        AtomicReference<Runnable> notification = new AtomicReference<>();
+        CloseNotifyingResource resource = new CloseNotifyingResource() {
+            @Override
+            public void onClosed(Runnable listener) {
+                notification.set(listener);
+            }
+
+            @Override
+            public void close() {
+                closed.set(true);
+            }
+        };
+        registry.register(resource);
+
+        notification.get().run();
+
+        assertEquals(0, registry.size());
+        registry.closeAll();
+        assertFalse(closed.get());
     }
 }

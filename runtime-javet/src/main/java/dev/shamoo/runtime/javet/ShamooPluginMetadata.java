@@ -84,6 +84,8 @@ public record ShamooPluginMetadata(
             Map.entry("paperRegisterCommand", COMMAND),
             Map.entry("velocityRegisterCommand", COMMAND),
             Map.entry("paperCommandReply", COMMAND),
+            Map.entry("paperCommandOpenInventory", COMMAND),
+            Map.entry("paperCommandGiveItem", COMMAND),
             Map.entry("paperCommandFindPlayer", COMMAND),
             Map.entry("paperCommandMainHand", COMMAND),
             Map.entry("paperCommandTakeMainHand", COMMAND),

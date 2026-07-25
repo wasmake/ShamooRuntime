@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** Thread-safe typed ownership registry that closes resources in reverse registration order. */
+@SuppressWarnings({"PMD.CloseResource", "PMD.CompareObjectsWithEquals"})
 public final class ResourceRegistry {
     static final PluginId RUNTIME_OWNER = new PluginId("runtime");
     private final Deque<OwnedResource> resources = new ArrayDeque<>();
@@ -22,8 +23,24 @@ public final class ResourceRegistry {
             PluginId owner, ResourceCategory category, String description, T resource) {
         ResourceRegistration registration = new ResourceRegistration(
                 UUID.randomUUID(), owner, category, description, Instant.now());
-        resources.push(new OwnedResource(registration, Objects.requireNonNull(resource, "resource")));
+        T registered = Objects.requireNonNull(resource, "resource");
+        OwnedResource owned = new OwnedResource(registration, registered);
+        resources.push(owned);
+        if (registered instanceof CloseNotifyingResource notifying) {
+            try {
+                notifying.onClosed(() -> forget(registered));
+            } catch (RuntimeException | Error failure) {
+                resources.remove(owned);
+                throw failure;
+            }
+        }
         return resource;
+    }
+
+    /** Removes an already-closed resource by identity without closing it again. */
+    public synchronized boolean forget(AutoCloseable resource) {
+        Objects.requireNonNull(resource, "resource");
+        return resources.removeIf(owned -> owned.resource() == resource);
     }
 
     public synchronized int size() {

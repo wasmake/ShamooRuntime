@@ -43,7 +43,9 @@ The global property cannot be replaced. Before Javet conversion, both directions
 and acyclic string-keyed lists/maps. Java/Javet objects, classes, class loaders, reflection members, dynamic proxies,
 and arbitrary service objects are rejected. No Java object proxy converter, class lookup, or reflection bridge is
 installed. JS functions cross only through `host.registerCallback(name, function)`; subsequent generated operations
-refer to the callback by name or an explicit `{$callback: name}` marker. Java `CompletionStage` results become native
+refer to the callback by name or an explicit `{$callback: name}` marker. Marker adaptation recursively copies nested
+lists/maps with a depth bound, recognizes only an exact one-key marker, and rejects every other non-data value. This
+allows compiler-scoped text and item actions without exposing Java functional interfaces. Java `CompletionStage` results become native
 Promises through an isolate completion queue, so no foreign thread accesses V8. Callback functions and contexts are
 tracked and removed on close.
 

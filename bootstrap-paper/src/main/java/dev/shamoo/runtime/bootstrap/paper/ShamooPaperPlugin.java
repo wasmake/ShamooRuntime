@@ -19,6 +19,7 @@ import dev.shamoo.runtime.platform.paper.PaperEventBridge;
 import dev.shamoo.runtime.platform.paper.PaperCommandBridge;
 import dev.shamoo.runtime.platform.paper.PaperSchedulerBridge;
 import dev.shamoo.runtime.platform.paper.PaperMessagingBridge;
+import dev.shamoo.runtime.platform.paper.PaperUiBridge;
 import dev.shamoo.runtime.platform.paper.nms.GeneratedPacketRegistry;
 import dev.shamoo.runtime.platform.paper.nms.PaperNmsInjectionManager;
 import dev.shamoo.runtime.platform.paper.packet.PacketAccessPolicy;
@@ -47,6 +48,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     private PaperEventBridge eventBridge;
     private PaperCommandBridge commandBridge;
     private PaperCommandContextBridge commandContextBridge;
+    private PaperUiBridge uiBridge;
     private PaperSchedulerBridge schedulerBridge;
     private PaperMessagingBridge messagingBridge;
     private OptionalProxyTransport proxyTransport;
@@ -58,8 +60,9 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         try {
             eventRegistry = GeneratedPaperEventRegistry.load(getClassLoader());
             eventBridge = new PaperEventBridge(this, platformResources);
-            commandBridge = new PaperCommandBridge(this, platformResources);
-            commandContextBridge = new PaperCommandContextBridge(getServer());
+            commandContextBridge = new PaperCommandContextBridge(this);
+            commandBridge = new PaperCommandBridge(this, commandContextBridge);
+            uiBridge = new PaperUiBridge(this, commandContextBridge);
             schedulerBridge = new PaperSchedulerBridge(this, platformResources);
             messagingBridge = new PaperMessagingBridge(this, platformResources);
             proxyTransport = platformResources.register(new OptionalProxyTransport(Duration.ofSeconds(3)));
@@ -127,12 +130,15 @@ public final class ShamooPaperPlugin extends JavaPlugin {
                                     .toCompletableFuture().join());
                 }),
                 Map.entry("paperRegisterCommand", (owner, metadata, arguments) -> {
-                    return commandBridge.register(owner, string(arguments, 0), strings(arguments, 1),
-                            (sender, alias, values) -> commandContextBridge.execute(sender, alias, values,
-                                    context -> typed(arguments, 2, ScriptCallback.class).invoke(List.of(context))));
+                    return commandBridge.register(owner, metadata, string(arguments, 0), strings(arguments, 1),
+                            argument(arguments, 2), typed(arguments, 3, ScriptCallback.class));
                 }),
                 Map.entry("paperCommandReply", (owner, metadata, arguments) -> commandContextBridge.reply(
-                        string(arguments, 0), string(arguments, 1))),
+                        string(arguments, 0), argument(arguments, 1))),
+                Map.entry("paperCommandOpenInventory", (owner, metadata, arguments) -> uiBridge.openInventory(
+                        owner, string(arguments, 0), argument(arguments, 1))),
+                Map.entry("paperCommandGiveItem", (owner, metadata, arguments) -> uiBridge.giveItem(
+                        owner, string(arguments, 0), argument(arguments, 1))),
                 Map.entry("paperCommandFindPlayer", (owner, metadata, arguments) -> commandContextBridge.findPlayer(
                         string(arguments, 0), string(arguments, 1))),
                 Map.entry("paperCommandMainHand", (owner, metadata, arguments) -> commandContextBridge.mainHand(
@@ -141,7 +147,14 @@ public final class ShamooPaperPlugin extends JavaPlugin {
                         string(arguments, 0), string(arguments, 1), integer(arguments, 2))),
                 Map.entry("paperScheduleGlobal", (owner, metadata, arguments) -> {
                     ScriptCallback callback = typed(arguments, 0, ScriptCallback.class);
-                    return schedulerBridge.runGlobal(owner, () -> callback.invoke(List.of()));
+                    return schedulerBridge.runGlobal(owner, () -> {
+                        try {
+                            callback.invoke(List.of()).whenComplete((ignored, failure) -> callback.close());
+                        } catch (RuntimeException | Error failure) {
+                            callback.close();
+                            throw failure;
+                        }
+                    });
                 }),
                 Map.entry("paperRegisterMessaging", (owner, metadata, arguments) -> {
                     return messagingBridge.register(owner, string(arguments, 0),
@@ -171,6 +184,13 @@ public final class ShamooPaperPlugin extends JavaPlugin {
 
     private static String string(java.util.List<Object> arguments, int index) {
         return typed(arguments, index, String.class);
+    }
+
+    private static Object argument(java.util.List<Object> arguments, int index) {
+        if (index >= arguments.size()) {
+            throw new IllegalArgumentException(PLATFORM_ARGUMENT + index + " is required");
+        }
+        return arguments.get(index);
     }
 
     private static boolean bool(java.util.List<Object> arguments, int index) {
@@ -216,6 +236,12 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         }
         if (packetManager != null) {
             packetManager.close();
+        }
+        if (uiBridge != null) {
+            uiBridge.close();
+        }
+        if (commandContextBridge != null) {
+            commandContextBridge.close();
         }
         try {
             platformResources.closeAll();

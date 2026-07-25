@@ -6,10 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.shamoo.runtime.core.CompiledBindingMetadata;
 import dev.shamoo.runtime.protocol.ManifestCodec;
+import dev.shamoo.runtime.protocol.CompilerMetadata;
 import dev.shamoo.runtime.protocol.PlatformKind;
 import dev.shamoo.runtime.protocol.PluginDescriptor;
 import dev.shamoo.runtime.protocol.ProtocolVersion;
 import java.util.Set;
+import java.util.Map;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 @SuppressWarnings({"PMD.UnitTestContainsTooManyAsserts", "PMD.UnitTestAssertionsShouldIncludeMessage",
@@ -62,6 +65,24 @@ class ShamooPluginMetadataTest {
         assertFalse(velocity.permitsPlatformOperation("paperSubscribePacket",
                 binding("paperSubscribePacket", "paper-listener", "onPacket")));
         assertEquals(Set.of("version", "components", "modules", "communication"), paper.data().keySet());
+    }
+
+    @Test
+    void authorizesOnlyExactCommandMethodForReplyAndUiOperations() {
+        ShamooPluginMetadata metadata = new ShamooPluginMetadata(PlatformKind.PAPER, Set.of(), Set.of("command"),
+                Map.of(new CompilerMetadata.MethodId("commands", "execute"),
+                        new CompilerMetadata.MethodAuthorization("paper", null, "command")),
+                Map.of(), Map.of(), Map.of(), Map.of(), false, false, Map.of());
+
+        for (String operation : List.of(
+                "paperCommandReply", "paperCommandOpenInventory", "paperCommandGiveItem")) {
+            assertTrue(metadata.permitsPlatformOperation(operation,
+                    new CompiledBindingMetadata("paper", operation, "commands", "execute",
+                            ProtocolVersion.CURRENT)));
+            assertFalse(metadata.permitsPlatformOperation(operation,
+                    new CompiledBindingMetadata("paper", operation, "commands", "other",
+                            ProtocolVersion.CURRENT)));
+        }
     }
 
     private static CompiledBindingMetadata binding(String operation, String componentId, String method) {
