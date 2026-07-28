@@ -2,8 +2,8 @@ plugins { `java-library` }
 
 dependencies {
     api(project(":runtime-core"))
-    compileOnly(libs.paper.api)
-    compileOnly(libs.netty.transport)
+    compileOnlyApi(libs.paper.api)
+    compileOnlyApi(libs.netty.transport)
     testImplementation(libs.netty.transport)
     testImplementation(libs.mockito.core)
     testCompileOnly(libs.paper.api)
