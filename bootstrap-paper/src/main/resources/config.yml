@@ -10,3 +10,9 @@ packets:
   allowed-plugins: []
   timeout-millis: 50
   maximum-pending: 256
+
+managed-lobby:
+  enabled: false
+  owner: shalobby
+  data-directory: data
+  maximum-pending-actions: 64

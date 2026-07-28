@@ -41,6 +41,11 @@ action identifiers in persistent item data, cancels configured click/drag/intera
 callback mappings with the owning generation. Command/action sender tokens exist only while their script completion is
 active; no `CommandSender`, `Player`, `Component`, `Inventory`, or `ItemStack` crosses into JavaScript.
 
+The optional production managed-lobby bridge is documented in [managed-lobby.md](managed-lobby.md). It is a direct,
+owner-gated custom binding rather than a generated general-purpose API and keeps all synchronous lobby cancellation in
+native Paper listeners. Unlike the generic Paper adapter, this optional feature supports standard Paper 1.21.8 only and
+causes startup to fail before managed defaults are generated when enabled on Folia.
+
 Bootstraps publish only named platform operations into Javet. Every invocation requires generated namespace/type and
 protocol metadata, binds ownership to the calling plugin, and registers listeners, commands, tasks, channels, and packet
 subscriptions in `ResourceRegistry`; server, proxy, registrar, scheduler, and packet registry objects are never exposed.

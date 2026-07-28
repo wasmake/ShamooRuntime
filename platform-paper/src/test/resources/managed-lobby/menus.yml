@@ -1,0 +1,216 @@
+menus:
+  - id: game-selector
+    rows: 3
+    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ JUEGOS ◆</bold></gradient>'
+    slots:
+      - slot: 4
+        material: NETHER_STAR
+        amount: 1
+        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Elige una aventura</bold></gradient>'
+        lore:
+          - '<italic:false><#A8B3C7>La disponibilidad se confirma al conectar.</#A8B3C7>'
+          - '<italic:false><#303746>•</#303746> <#F8FAFC>No se muestran estados estimados.</#F8FAFC>'
+        action: { type: none }
+      - slot: 10
+        material: GRASS_BLOCK
+        amount: 1
+        name: '<italic:false><#55FF88><bold>◆ Supervivencia</bold></#55FF88>'
+        lore:
+          - '<italic:false><#A8B3C7>Construye, comercia y progresa.</#A8B3C7>'
+          - '<italic:false><#A8B3C7>Estado actual: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#55FF88>Clic para solicitar conexión</#55FF88>'
+        action: { type: connect, target: survival }
+      - slot: 13
+        material: OAK_SAPLING
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Skyblock</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Haz crecer una isla desde cero.</#A8B3C7>'
+          - '<italic:false><#A8B3C7>Estado actual: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para solicitar conexión</#38D9FF>'
+        action: { type: connect, target: skyblock }
+      - slot: 16
+        material: SLIME_BALL
+        amount: 1
+        name: '<italic:false><#FFD166><bold>◆ Minijuegos</bold></#FFD166>'
+        lore:
+          - '<italic:false><#A8B3C7>Rondas rápidas para jugar en grupo.</#A8B3C7>'
+          - '<italic:false><#A8B3C7>Estado actual: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#FFD166>Clic para solicitar conexión</#FFD166>'
+        action: { type: connect, target: minigames }
+      - slot: 22
+        material: CLOCK
+        amount: 1
+        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Cambiar de lobby</bold></gradient>'
+        lore:
+          - '<italic:false><#A8B3C7>Abre el selector de puntos de encuentro.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para continuar</#F8FAFC>'
+        action: { type: menu, target: lobby-selector }
+  - id: lobby-selector
+    rows: 3
+    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ LOBBIES ◆</bold></gradient>'
+    slots:
+      - slot: 4
+        material: CLOCK
+        amount: 1
+        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Puntos de encuentro</bold></gradient>'
+        lore:
+          - '<italic:false><#A8B3C7>La red resolverá cada solicitud.</#A8B3C7>'
+          - '<italic:false><#303746>•</#303746> <#F8FAFC>Capacidad actual: desconocida</#F8FAFC>'
+        action: { type: none }
+      - slot: 11
+        material: SEA_LANTERN
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Lobby 1</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Disponibilidad: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para solicitar conexión</#38D9FF>'
+        action: { type: connect, target: lobby-1 }
+      - slot: 13
+        material: PRISMARINE_CRYSTALS
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Lobby 2</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Disponibilidad: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para solicitar conexión</#38D9FF>'
+        action: { type: connect, target: lobby-2 }
+      - slot: 15
+        material: HEART_OF_THE_SEA
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Lobby 3</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Disponibilidad: <#F8FAFC>por confirmar</#F8FAFC></#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para solicitar conexión</#38D9FF>'
+        action: { type: connect, target: lobby-3 }
+      - slot: 22
+        material: COMPASS
+        amount: 1
+        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Volver a juegos</bold></gradient>'
+        lore:
+          - '<italic:false><#A8B3C7>Regresa al selector de modalidades.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para continuar</#F8FAFC>'
+        action: { type: menu, target: game-selector }
+  - id: profile
+    rows: 3
+    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ TU PERFIL ◆</bold></gradient>'
+    slots:
+      - slot: 4
+        material: PLAYER_HEAD
+        amount: 1
+        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Resumen personal</bold></gradient>'
+        lore:
+          - '<italic:false><#A8B3C7>Tu información se muestra en el marcador.</#A8B3C7>'
+          - '<italic:false><#303746>•</#303746> <#F8FAFC>Datos actualizados por el lobby</#F8FAFC>'
+        action: { type: title, target: perfil }
+      - slot: 10
+        material: NAME_TAG
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Identidad</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Consulta tu nombre en el marcador lateral.</#A8B3C7>'
+        action: { type: none }
+      - slot: 12
+        material: GRASS_BLOCK
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Ubicación</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Mundo y coordenadas aparecen en el marcador.</#A8B3C7>'
+        action: { type: none }
+      - slot: 14
+        material: CLOCK
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Conexión</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Tu latencia actual aparece en el marcador.</#A8B3C7>'
+        action: { type: none }
+      - slot: 16
+        material: SPYGLASS
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Visibilidad</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Revisa tu modo activo en el marcador.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para alternarlo</#F8FAFC>'
+        action: { type: visibility, target: cycle }
+      - slot: 22
+        material: ENDER_PEARL
+        amount: 1
+        name: '<italic:false><#55FF88><bold>◆ Volver al inicio</bold></#55FF88>'
+        lore:
+          - '<italic:false><#A8B3C7>Regresa al punto de aparición configurado.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#55FF88>Clic para volver</#55FF88>'
+        action: { type: spawn }
+  - id: settings
+    rows: 3
+    title: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ AJUSTES ◆</bold></gradient>'
+    slots:
+      - slot: 4
+        material: COMPARATOR
+        amount: 1
+        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Preferencias del lobby</bold></gradient>'
+        lore:
+          - '<italic:false><#A8B3C7>Elige cómo quieres ver a los demás.</#A8B3C7>'
+        action: { type: none }
+      - slot: 10
+        material: LIME_DYE
+        amount: 1
+        name: '<italic:false><#55FF88><bold>◆ Ver a todos</bold></#55FF88>'
+        lore:
+          - '<italic:false><#A8B3C7>Muestra a todos los jugadores del lobby.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#55FF88>Clic para aplicar</#55FF88>'
+        action: { type: visibility, target: all }
+      - slot: 12
+        material: YELLOW_DYE
+        amount: 1
+        name: '<italic:false><#FFD166><bold>◆ Ver al personal</bold></#FFD166>'
+        lore:
+          - '<italic:false><#A8B3C7>Muestra únicamente al equipo autorizado.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#FFD166>Clic para aplicar</#FFD166>'
+        action: { type: visibility, target: staff }
+      - slot: 14
+        material: GRAY_DYE
+        amount: 1
+        name: '<italic:false><#A8B3C7><bold>◆ Ocultar jugadores</bold></#A8B3C7>'
+        lore:
+          - '<italic:false><#A8B3C7>Oculta a los demás jugadores del lobby.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para aplicar</#F8FAFC>'
+        action: { type: visibility, target: none }
+      - slot: 16
+        material: AMETHYST_SHARD
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Probar sonido</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Reproduce una confirmación breve.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para escuchar</#38D9FF>'
+        action: { type: sound, target: clic }
+      - slot: 20
+        material: FIREWORK_STAR
+        amount: 1
+        name: '<italic:false><#38D9FF><bold>◆ Probar partículas</bold></#38D9FF>'
+        lore:
+          - '<italic:false><#A8B3C7>Muestra un destello a tu alrededor.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#38D9FF>Clic para mostrar</#38D9FF>'
+        action: { type: particle, target: destello }
+      - slot: 22
+        material: EXPERIENCE_BOTTLE
+        amount: 1
+        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Ver resumen</bold></gradient>'
+        lore:
+          - '<italic:false><#A8B3C7>Muestra una tarjeta breve en pantalla.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para mostrar</#F8FAFC>'
+        action: { type: title, target: perfil }
+      - slot: 24
+        material: ENDER_PEARL
+        amount: 1
+        name: '<italic:false><#55FF88><bold>◆ Volver al inicio</bold></#55FF88>'
+        lore:
+          - '<italic:false><#A8B3C7>Regresa al punto de aparición configurado.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#55FF88>Clic para volver</#55FF88>'
+        action: { type: spawn }
+      - slot: 26
+        material: COMPASS
+        amount: 1
+        name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Selector de juegos</bold></gradient>'
+        lore:
+          - '<italic:false><#A8B3C7>Abre el catálogo de modalidades.</#A8B3C7>'
+          - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para continuar</#F8FAFC>'
+        action: { type: menu, target: game-selector }

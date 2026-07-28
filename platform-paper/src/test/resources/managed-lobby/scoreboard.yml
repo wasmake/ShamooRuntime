@@ -1,0 +1,24 @@
+sidebar:
+  enabled: true
+  interval-ticks: 20
+  title-frames:
+    - '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>'
+    - '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ SHALOBBY ◆</bold></gradient>'
+    - '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ SHALOBBY ◆</bold></gradient>'
+    - '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>'
+  lines:
+    - '<#303746>◆ ───────────── ◆</#303746>'
+    - '<#A8B3C7>Jugador</#A8B3C7>'
+    - '<#F8FAFC>▸ <#38D9FF>%player%</#38D9FF></#F8FAFC>'
+    - ''
+    - '<#A8B3C7>Sesión</#A8B3C7>'
+    - '<#F8FAFC>▸ En línea: <#4F7CFF>%online%</#4F7CFF></#F8FAFC>'
+    - '<#F8FAFC>▸ Mundo: <#4F7CFF>%world%</#4F7CFF></#F8FAFC>'
+    - '<#F8FAFC>▸ Posición: <#4F7CFF>%x%, %y%, %z%</#4F7CFF></#F8FAFC>'
+    - '<#F8FAFC>▸ Ping: <#4F7CFF>%ping% ms</#4F7CFF></#F8FAFC>'
+    - ''
+    - '<#A8B3C7>Preferencias</#A8B3C7>'
+    - '<#F8FAFC>▸ Visibilidad: <#38D9FF>%visibility%</#38D9FF></#F8FAFC>'
+    - ''
+    - '<gradient:#38D9FF:#4F7CFF:#A855F7>✦ Elige tu próxima aventura ✦</gradient>'
+    - '<#303746>◆ ───────────── ◆</#303746>'

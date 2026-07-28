@@ -1,0 +1,34 @@
+portals:
+  - id: portal-survival
+    enabled: false
+    world: world
+    min: { x: -12, y: 64, z: 18 }
+    max: { x: -8, y: 68, z: 20 }
+    permission: lobby.portal.survival
+    priority: 10
+    cooldown-ms: 2500
+    destination: survival
+    action: { type: connect, target: survival }
+    visualize: false
+  - id: portal-skyblock
+    enabled: false
+    world: world
+    min: { x: -2, y: 64, z: 18 }
+    max: { x: 2, y: 68, z: 20 }
+    permission: lobby.portal.skyblock
+    priority: 10
+    cooldown-ms: 2500
+    destination: skyblock
+    action: { type: connect, target: skyblock }
+    visualize: false
+  - id: portal-minigames
+    enabled: false
+    world: world
+    min: { x: 8, y: 64, z: 18 }
+    max: { x: 12, y: 68, z: 20 }
+    permission: lobby.portal.minigames
+    priority: 10
+    cooldown-ms: 2500
+    destination: minigames
+    action: { type: connect, target: minigames }
+    visualize: false

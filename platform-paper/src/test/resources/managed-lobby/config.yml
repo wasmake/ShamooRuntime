@@ -1,0 +1,53 @@
+join:
+  suppress-message: true
+  teleport: true
+  reset: true
+  welcome-title: bienvenida
+  welcome-sound: bienvenida
+  welcome-particle: bienvenida
+  welcome-message: bienvenida
+void-rescue-y: -80
+protection:
+  enabled: true
+  bypass-permission: lobby.protection.bypass
+portal-cooldown-ms: 2500
+enforcement-ticks: 200
+worlds:
+  - name: world
+    time: 6000
+    storm: false
+    thundering: false
+    game-rules:
+      announceAdvancements: false
+      commandBlockOutput: false
+      disableRaids: true
+      doDaylightCycle: false
+      doEntityDrops: false
+      doFireTick: false
+      doImmediateRespawn: true
+      doInsomnia: false
+      doMobLoot: false
+      doMobSpawning: false
+      doPatrolSpawning: false
+      doTileDrops: false
+      doTraderSpawning: false
+      doVinesSpread: false
+      doWardenSpawning: false
+      doWeatherCycle: false
+      drowningDamage: false
+      fallDamage: false
+      fireDamage: false
+      freezeDamage: false
+      keepInventory: true
+      mobGriefing: false
+      projectilesCanBreakBlocks: false
+      randomTickSpeed: 0
+      showDeathMessages: false
+      spawnRadius: 0
+      spectatorsGenerateChunks: false
+      tntExplodes: false
+visibility:
+  default: all
+  staff-permission: lobby.visibility.staff
+transfers:
+  cooldown-ms: 3000

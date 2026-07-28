@@ -1,0 +1,102 @@
+messages:
+  prefix: '<#303746>[</#303746><gradient:#38D9FF:#4F7CFF:#A855F7>ShaLobby</gradient><#303746>]</#303746> '
+  bienvenida: '<#303746>◆</#303746> <gradient:#38D9FF:#4F7CFF:#A855F7><bold>SHALOBBY</bold></gradient> <#303746>▸</#303746> <#A8B3C7>Bienvenido, <#F8FAFC>%player%</#F8FAFC>. Elige tu próxima aventura.</#A8B3C7>'
+  sin-permiso: '<#303746>◆</#303746> <#FF5C7A>No tienes permiso para realizar esta acción.</#FF5C7A>'
+  configuracion-invalida: '<#303746>◆</#303746> <#FF5C7A>La configuración no es válida. Consulta el registro del servidor.</#FF5C7A>'
+  recarga-completada: '<#303746>◆</#303746> <#55FF88>Configuración recargada correctamente.</#55FF88>'
+  recarga-fallida: '<#303746>◆</#303746> <#FF5C7A>No se pudo recargar la configuración.</#FF5C7A>'
+  spawn-no-configurado: '<#303746>◆</#303746> <#FFB347>El punto de aparición todavía no está configurado.</#FFB347>'
+  spawn-establecido: '<#303746>◆</#303746> <#55FF88>Punto de aparición guardado en <#F8FAFC>%world%</#F8FAFC>.</#55FF88>'
+  spawn-solicitado: '<#303746>◆</#303746> <#A8B3C7>Regresando al punto de aparición...</#A8B3C7>'
+  objetos-restaurados: '<#303746>◆</#303746> <#55FF88>Tu barra rápida ha sido restaurada.</#55FF88>'
+  menu-abierto: '<#303746>◆</#303746> <#A8B3C7>Menú <#F8FAFC>%menu%</#F8FAFC> abierto.</#A8B3C7>'
+  menu-no-disponible: '<#303746>◆</#303746> <#FF5C7A>El menú <#F8FAFC>%menu%</#F8FAFC> no está disponible.</#FF5C7A>'
+  visibilidad-todos: '<#303746>◆</#303746> <#55FF88>Ahora puedes ver a todos los jugadores.</#55FF88>'
+  visibilidad-personal: '<#303746>◆</#303746> <#FFD166>Ahora solo puedes ver al personal.</#FFD166>'
+  visibilidad-ninguno: '<#303746>◆</#303746> <#A8B3C7>Ahora solo puedes verte a ti mismo.</#A8B3C7>'
+  visibilidad-actualizada: '<#303746>◆</#303746> <gradient:#38D9FF:#4F7CFF:#A855F7>Visibilidad actualizada:</gradient> <#F8FAFC>%visibility%</#F8FAFC><#A8B3C7>.</#A8B3C7>'
+  transferencia-iniciada: '<#303746>◆</#303746> <#A8B3C7>Solicitando conexión con <#F8FAFC>%server%</#F8FAFC>...</#A8B3C7>'
+  transferencia-espera: '<#303746>◆</#303746> <#FFB347>Espera <#F8FAFC>%seconds%</#F8FAFC> s antes de cambiar de servidor.</#FFB347>'
+  item-cooldown: '<#303746>◆</#303746> <#FFB347>Espera <#F8FAFC>%seconds%</#F8FAFC> s antes de volver a usar este objeto.</#FFB347>'
+  portal-cooldown: '<#303746>◆</#303746> <#FFB347>Espera <#F8FAFC>%seconds%</#F8FAFC> s antes de volver a usar este portal.</#FFB347>'
+  servidor-no-disponible: '<#303746>◆</#303746> <#FF5C7A>El destino <#F8FAFC>%server%</#F8FAFC> no está disponible.</#FF5C7A>'
+  portal-varita: '<#303746>◆</#303746> <gradient:#38D9FF:#4F7CFF:#A855F7>Varita de portales entregada.</gradient> <#A8B3C7>Izquierdo: posición 1; derecho: posición 2.</#A8B3C7>'
+  portal-seleccion-incompleta: '<#303746>◆</#303746> <#FFB347>Selecciona las dos posiciones antes de crear el portal.</#FFB347>'
+  portal-mundos-distintos: '<#303746>◆</#303746> <#FF5C7A>Las dos posiciones deben pertenecer al mismo mundo.</#FF5C7A>'
+  portal-creado: '<#303746>◆</#303746> <#55FF88>Portal <#F8FAFC>%portal%</#F8FAFC> creado correctamente.</#55FF88>'
+  portal-eliminado: '<#303746>◆</#303746> <#FFB347>Portal <#F8FAFC>%portal%</#F8FAFC> eliminado.</#FFB347>'
+  portal-no-encontrado: '<#303746>◆</#303746> <#FF5C7A>No existe el portal <#F8FAFC>%portal%</#F8FAFC>.</#FF5C7A>'
+  portal-habilitado: '<#303746>◆</#303746> <#55FF88>Portal <#F8FAFC>%portal%</#F8FAFC> habilitado.</#55FF88>'
+  portal-deshabilitado: '<#303746>◆</#303746> <#FFB347>Portal <#F8FAFC>%portal%</#F8FAFC> deshabilitado.</#FFB347>'
+  portal-destino: '<#303746>◆</#303746> <#55FF88>El portal <#F8FAFC>%portal%</#F8FAFC> ahora conecta con <#F8FAFC>%server%</#F8FAFC>.</#55FF88>'
+  portal-visualizacion: '<#303746>◆</#303746> <#A8B3C7>Visualización de portales: <#F8FAFC>%enabled%</#F8FAFC>.</#A8B3C7>'
+  portal-lista: '<#303746>◆</#303746> <#A8B3C7>Portales configurados: <#F8FAFC>%count%</#F8FAFC>.</#A8B3C7>'
+  command-error: '%prefix%<#FF5C7A>No se pudo completar la operación. Revisa el registro del servidor.</#FF5C7A>'
+  player-required: '%prefix%<#FF5C7A>Este comando necesita un jugador válido.</#FF5C7A>'
+  invalid-arguments: '%prefix%<#FFB347>Los argumentos indicados no son válidos.</#FFB347>'
+  spawn-requested: '%prefix%<#55FF88>Teletransporte al lobby solicitado.</#55FF88>'
+  spawn-player-requested: '%prefix%<#55FF88>Teletransporte al lobby solicitado para <#F8FAFC>%player%</#F8FAFC>.</#55FF88>'
+  spawn-set: '%prefix%<#55FF88>Punto de aparición actualizado.</#55FF88>'
+  reload-complete: '%prefix%<#55FF88>Configuración recargada correctamente.</#55FF88>'
+  items-given: '%prefix%<#55FF88>Barra rápida administrada restaurada para <#F8FAFC>%player%</#F8FAFC>.</#55FF88>'
+  items-reset: '%prefix%<#55FF88>Barra rápida administrada restaurada para <#F8FAFC>%player%</#F8FAFC>.</#55FF88>'
+  menu-opened: '%prefix%<#55FF88>Menú <#F8FAFC>%menu%</#F8FAFC> abierto para <#F8FAFC>%player%</#F8FAFC>.</#55FF88>'
+  portal-wand: '%prefix%<#55FF88>Varita de portales entregada.</#55FF88> <#A8B3C7>La edición también requiere <#F8FAFC>lobby.protection.bypass</#F8FAFC>.</#A8B3C7>'
+  portal-created: '%prefix%<#55FF88>Portal <#F8FAFC>%portal%</#F8FAFC> creado.</#55FF88>'
+  portal-deleted: '%prefix%<#FFB347>Portal <#F8FAFC>%portal%</#F8FAFC> eliminado.</#FFB347>'
+  portal-list: '%prefix%<#A8B3C7>Portales configurados (<#F8FAFC>%count%</#F8FAFC>): <#F8FAFC>%ids%</#F8FAFC>.</#A8B3C7>'
+  portal-info: '%prefix%<#A8B3C7>Portal <#F8FAFC>%portal%</#F8FAFC>: mundo=<#F8FAFC>%world%</#F8FAFC>, min=<#F8FAFC>%minimum%</#F8FAFC>, max=<#F8FAFC>%maximum%</#F8FAFC>, permiso=<#F8FAFC>%permission%</#F8FAFC>, prioridad=<#F8FAFC>%priority%</#F8FAFC>, cooldown=<#F8FAFC>%cooldown% ms</#F8FAFC>, visualización=<#F8FAFC>%visualization%</#F8FAFC>, activo=<#F8FAFC>%enabled%</#F8FAFC>, destino=<#F8FAFC>%destination%</#F8FAFC>.</#A8B3C7>'
+  portal-enabled: '%prefix%<#55FF88>Portal <#F8FAFC>%portal%</#F8FAFC> activado.</#55FF88>'
+  portal-disabled: '%prefix%<#FFB347>Portal <#F8FAFC>%portal%</#F8FAFC> desactivado.</#FFB347>'
+  portal-pos1: '%prefix%<#55FF88>Primera posición guardada en <#F8FAFC>%world%</#F8FAFC> (<#F8FAFC>%x%, %y%, %z%</#F8FAFC>).</#55FF88>'
+  portal-pos2: '%prefix%<#55FF88>Segunda posición guardada en <#F8FAFC>%world%</#F8FAFC> (<#F8FAFC>%x%, %y%, %z%</#F8FAFC>).</#55FF88>'
+  portal-destination: '%prefix%<#55FF88>Destino de <#F8FAFC>%portal%</#F8FAFC> actualizado a <#F8FAFC>%destination%</#F8FAFC>.</#55FF88>'
+  portal-visualization-enabled: '%prefix%<#55FF88>Visualización de portales activada.</#55FF88>'
+  portal-visualization-disabled: '%prefix%<#FFB347>Visualización de portales desactivada.</#FFB347>'
+  status: '%prefix%<#A8B3C7>Estado: <#F8FAFC>%state%</#F8FAFC>, activo=<#F8FAFC>%active%</#F8FAFC>, admisión=<#F8FAFC>%admission%</#F8FAFC>, pendientes=<#F8FAFC>%pending%/%maximum%</#F8FAFC>, aparición=<#F8FAFC>%spawn%</#F8FAFC>, objetos=<#F8FAFC>%items%</#F8FAFC>, menús=<#F8FAFC>%menus%</#F8FAFC>, servidores=<#F8FAFC>%servers%</#F8FAFC>, portales=<#F8FAFC>%portals%</#F8FAFC>.</#A8B3C7>'
+  debug: '%prefix%<#A8B3C7>Diagnóstico: estado=<#F8FAFC>%state%</#F8FAFC>, activo=<#F8FAFC>%active%</#F8FAFC>, admisión=<#F8FAFC>%admission%</#F8FAFC>, pendientes=<#F8FAFC>%pending%/%maximum%</#F8FAFC>, generación=<#F8FAFC>%generation%</#F8FAFC>, directorio=<#F8FAFC>%directory%</#F8FAFC>, aparición=<#F8FAFC>%spawn%</#F8FAFC>, objetos=<#F8FAFC>%items%</#F8FAFC>, menús=<#F8FAFC>%menus%</#F8FAFC>, servidores=<#F8FAFC>%servers%</#F8FAFC>, portales=<#F8FAFC>%portals%</#F8FAFC>.</#A8B3C7>'
+  unavailable: '%prefix%<#FFB347>La operación no está disponible en el contexto actual. Revisa la configuración, el mundo administrado, la selección y los permisos requeridos.</#FFB347>'
+  unknown: '%prefix%<#FF5C7A>No se encontró el recurso solicitado.</#FF5C7A>'
+  invalid: '%prefix%<#FF5C7A>El Runtime rechazó la operación porque sus datos o configuración no son válidos.</#FF5C7A>'
+  overloaded: '%prefix%<#FFB347>El Runtime del lobby está ocupado. Inténtalo de nuevo en unos segundos.</#FFB347>'
+titles:
+  - id: bienvenida
+    title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ SHALOBBY ✦</bold></gradient>'
+    subtitle: '<#A8B3C7>Tu aventura comienza aquí</#A8B3C7>'
+    fade-in-ticks: 10
+    stay-ticks: 60
+    fade-out-ticks: 20
+  - id: perfil
+    title: '<gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ TU PERFIL ◆</bold></gradient>'
+    subtitle: '<#A8B3C7>Jugador: <#F8FAFC>%player%</#F8FAFC> <#303746>•</#303746> Ping: <#F8FAFC>%ping% ms</#F8FAFC></#A8B3C7>'
+    fade-in-ticks: 5
+    stay-ticks: 45
+    fade-out-ticks: 10
+sounds:
+  - id: bienvenida
+    sound: UI_TOAST_CHALLENGE_COMPLETE
+    volume: 0.8
+    pitch: 1.1
+  - id: clic
+    sound: UI_BUTTON_CLICK
+    volume: 0.7
+    pitch: 1.2
+  - id: confirmacion
+    sound: ENTITY_EXPERIENCE_ORB_PICKUP
+    volume: 0.8
+    pitch: 1.35
+particles:
+  - id: bienvenida
+    particle: HAPPY_VILLAGER
+    count: 18
+    offset-x: 0.6
+    offset-y: 1.0
+    offset-z: 0.6
+    speed: 0.05
+  - id: destello
+    particle: END_ROD
+    count: 14
+    offset-x: 0.5
+    offset-y: 0.8
+    offset-z: 0.5
+    speed: 0.03

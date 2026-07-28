@@ -275,7 +275,7 @@ public final class ShamooNodeRuntime implements AutoCloseable {
     @SuppressWarnings("try")
     public CompletableFuture<Object> invokeCallback(String name, List<Object> arguments) {
         Objects.requireNonNull(name, "name");
-        List<Object> copied = List.copyOf(arguments);
+        List<Object> copied = java.util.Collections.unmodifiableList(new ArrayList<>(arguments));
         return submit(() -> {
             assertOwnerThread();
             V8ValueFunction function = javaProxyRegistry.callback(name);

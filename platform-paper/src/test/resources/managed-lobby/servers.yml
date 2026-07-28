@@ -1,0 +1,25 @@
+servers:
+  - id: survival
+    enabled: true
+    target: survival
+    display-name: '<italic:false><#55FF88><bold>◆ Supervivencia</bold></#55FF88>'
+  - id: skyblock
+    enabled: true
+    target: skyblock
+    display-name: '<italic:false><#38D9FF><bold>◆ Skyblock</bold></#38D9FF>'
+  - id: minigames
+    enabled: true
+    target: minigames
+    display-name: '<italic:false><#FFD166><bold>◆ Minijuegos</bold></#FFD166>'
+  - id: lobby-1
+    enabled: true
+    target: lobby-1
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Lobby 1</bold></gradient>'
+  - id: lobby-2
+    enabled: true
+    target: lobby-2
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Lobby 2</bold></gradient>'
+  - id: lobby-3
+    enabled: true
+    target: lobby-3
+    display-name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Lobby 3</bold></gradient>'

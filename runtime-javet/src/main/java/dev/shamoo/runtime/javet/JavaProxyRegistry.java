@@ -53,7 +53,7 @@ public final class JavaProxyRegistry implements AutoCloseable {
                             new IdentityHashMap<>()));
                 }
             }
-            Object result = hostFunction.invoke(List.copyOf(converted));
+            Object result = hostFunction.invoke(java.util.Collections.unmodifiableList(converted));
             if (result instanceof CompletionStage<?> stage) {
                 V8ValuePromise promise = runtime.createV8ValuePromise();
                 stage.whenComplete((value, failure) -> isolateCompletion.accept(() -> {
@@ -185,7 +185,7 @@ public final class JavaProxyRegistry implements AutoCloseable {
             for (Object item : list) {
                 safe.add(requireDataValue(item, boundary, visited));
             }
-            return List.copyOf(safe);
+            return java.util.Collections.unmodifiableList(safe);
         }
         if (value instanceof Map<?, ?> map) {
             Map<String, Object> safe = new LinkedHashMap<>();
@@ -195,9 +195,13 @@ public final class JavaProxyRegistry implements AutoCloseable {
                 }
                 safe.put(text, requireDataValue(item, boundary, visited));
             });
-            return Map.copyOf(safe);
+            return java.util.Collections.unmodifiableMap(safe);
         }
         throw new IllegalArgumentException(boundary + " must contain only immutable data values");
+    }
+
+    static Object requireDataValue(Object value, String boundary) {
+        return requireDataValue(value, boundary, new IdentityHashMap<>());
     }
 
     @Override

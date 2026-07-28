@@ -1,11 +1,14 @@
 package dev.shamoo.runtime.bootstrap.paper;
 
 import dev.shamoo.runtime.core.PluginId;
+import dev.shamoo.runtime.core.PluginRuntimeContext;
 import dev.shamoo.runtime.core.ResourceRegistry;
+import dev.shamoo.runtime.core.ResourceCategory;
 import dev.shamoo.runtime.core.PlatformCapabilities;
 import dev.shamoo.runtime.core.OptionalProxyTransport;
 import dev.shamoo.runtime.core.ScriptCallback;
 import dev.shamoo.runtime.javet.JavetPluginHost;
+import dev.shamoo.runtime.javet.HostFunction;
 import dev.shamoo.runtime.protocol.CompatibilityInput;
 import dev.shamoo.runtime.protocol.PlatformKind;
 import dev.shamoo.runtime.protocol.ProtocolVersion;
@@ -19,6 +22,9 @@ import dev.shamoo.runtime.platform.paper.PaperEventBridge;
 import dev.shamoo.runtime.platform.paper.PaperCommandBridge;
 import dev.shamoo.runtime.platform.paper.PaperSchedulerBridge;
 import dev.shamoo.runtime.platform.paper.PaperMessagingBridge;
+import dev.shamoo.runtime.platform.paper.ManagedLobbyStore;
+import dev.shamoo.runtime.platform.paper.PaperManagedLobbyBridge;
+import dev.shamoo.runtime.platform.paper.PaperManagedLobbyCoordinator;
 import dev.shamoo.runtime.platform.paper.PaperUiBridge;
 import dev.shamoo.runtime.platform.paper.nms.GeneratedPacketRegistry;
 import dev.shamoo.runtime.platform.paper.nms.PaperNmsInjectionManager;
@@ -41,6 +47,7 @@ import org.bukkit.event.EventPriority;
 public final class ShamooPaperPlugin extends JavaPlugin {
     private static final PluginId RUNTIME_OWNER = new PluginId("shamooruntime");
     private static final String PLATFORM_ARGUMENT = "platform binding argument ";
+    private static final String FOLIA_MARKER = "io.papermc.paper.threadedregions.RegionizedServer";
     private JavetPluginHost pluginHost;
     private final ResourceRegistry packetResources = new ResourceRegistry();
     private final ResourceRegistry platformResources = new ResourceRegistry();
@@ -54,10 +61,14 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     private OptionalProxyTransport proxyTransport;
     private PacketDispatcherHub packetDispatcher;
     private PaperNmsInjectionManager packetManager;
+    private PaperManagedLobbyCoordinator managedLobbyCoordinator;
+    private ManagedLobbyStore managedLobbyStore;
 
     @Override
     public void onEnable() {
         try {
+            requireManagedLobbyPlatform(getConfig().getBoolean("managed-lobby.enabled", false),
+                    isFolia(getServer().getName(), classPresent(FOLIA_MARKER, getClassLoader())));
             eventRegistry = GeneratedPaperEventRegistry.load(getClassLoader());
             eventBridge = new PaperEventBridge(this, platformResources);
             commandContextBridge = new PaperCommandContextBridge(this);
@@ -69,10 +80,11 @@ public final class ShamooPaperPlugin extends JavaPlugin {
             messagingBridge.registerProxyTransport(RUNTIME_OWNER, proxyTransport);
             enablePackets();
             enablePacketProcessProbe();
+            managedLobbyCoordinator = new PaperManagedLobbyCoordinator(this);
             pluginHost = new JavetPluginHost(pluginDirectory(), compatibility(), platformCapabilities(),
                     Duration.ofMillis(getConfig().getLong("plugins.stability-millis", 200)),
                     Duration.ofMillis(getConfig().getLong("plugins.drain-timeout-millis", 5000)),
-                    context -> Map.of(), System.getLogger(getClass().getName()));
+                    this::customBindings, System.getLogger(getClass().getName()));
             PaperRuntimeCommands.register(this, pluginHost::pluginStatuses);
             pluginHost.startAsync(Duration.ofMillis(getConfig().getLong("plugins.watch-debounce-millis", 500)))
                     .whenComplete((ignored, failure) -> startupCompleted(failure));
@@ -99,14 +111,96 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     }
 
     private void startupFailed(Throwable failure) {
-        getLogger().log(Level.SEVERE, "Unable to initialize the V8 runtime", failure);
+        getLogger().log(Level.SEVERE, "Unable to initialize ShamooRuntime", failure);
         getServer().getPluginManager().disablePlugin(this);
+    }
+
+    static boolean isFolia(String serverName, boolean markerPresent) {
+        return markerPresent || "Folia".equalsIgnoreCase(serverName);
+    }
+
+    static void requireManagedLobbyPlatform(boolean enabled, boolean folia) {
+        if (enabled && folia) {
+            throw new IllegalStateException("managed-lobby supports standard Paper 1.21.8 only; "
+                    + "disable managed-lobby.enabled before running ShamooRuntime on Folia");
+        }
+    }
+
+    private static boolean classPresent(String name, ClassLoader classLoader) {
+        try {
+            Class.forName(name, false, classLoader);
+            return true;
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        }
     }
 
     private java.nio.file.Path pluginDirectory() {
         String configured = getConfig().getString("plugins.directory", "plugins");
         java.nio.file.Path path = java.nio.file.Path.of(configured);
         return path.isAbsolute() ? path : getDataFolder().toPath().resolve(path);
+    }
+
+    @SuppressWarnings("PMD.CloseResource")
+    private Map<String, HostFunction> customBindings(PluginRuntimeContext context) {
+        if (!getConfig().getBoolean("managed-lobby.enabled", false)) {
+            return Map.of();
+        }
+        PluginId owner = new PluginId(getConfig().getString("managed-lobby.owner", "shalobby"));
+        if (!owner.equals(context.candidate().pluginId())) {
+            return Map.of();
+        }
+        PaperManagedLobbyBridge bridge = new PaperManagedLobbyBridge(this, context.generationId(),
+                sharedManagedLobbyStore(owner), managedLobbyCoordinator,
+                context.invocations(), getConfig().getInt("managed-lobby.maximum-pending-actions", 64));
+        context.resources().register(owner, ResourceCategory.GENERIC,
+                "Paper managed lobby generation " + context.generationId(), bridge);
+        return Map.of("paperManagedLobby", new HostFunction() {
+            @Override
+            public Object invoke(List<Object> arguments) {
+                return bridge.invoke(arguments);
+            }
+
+            @Override
+            public Object invoke(List<Object> arguments, boolean admitted) {
+                return bridge.invoke(arguments, admitted);
+            }
+        });
+    }
+
+    private synchronized ManagedLobbyStore sharedManagedLobbyStore(PluginId owner) {
+        if (managedLobbyStore == null) {
+            managedLobbyStore = new ManagedLobbyStore(managedLobbyDirectory(owner));
+        }
+        return managedLobbyStore;
+    }
+
+    private java.nio.file.Path managedLobbyDirectory(PluginId owner) {
+        String configured = getConfig().getString("managed-lobby.data-directory", "data");
+        java.nio.file.Path path = java.nio.file.Path.of(configured);
+        return confinedManagedLobbyDirectory(path.isAbsolute() ? path : getDataFolder().toPath().resolve(path),
+                pluginDirectory(), owner);
+    }
+
+    static java.nio.file.Path confinedManagedLobbyDirectory(java.nio.file.Path dataRoot,
+            java.nio.file.Path pluginDirectory, PluginId owner) {
+        java.nio.file.Path root;
+        java.nio.file.Path pluginRoot;
+        java.nio.file.Path result;
+        try {
+            root = ManagedLobbyStore.resolveExistingAncestors(dataRoot);
+            pluginRoot = ManagedLobbyStore.resolveExistingAncestors(pluginDirectory);
+            result = ManagedLobbyStore.resolveExistingAncestors(root.resolve(owner.value()));
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("unable to resolve managed-lobby data confinement", exception);
+        }
+        if (result.startsWith(pluginRoot) || pluginRoot.startsWith(result)) {
+            throw new IllegalArgumentException("managed lobby owner directory must not overlap plugins.directory");
+        }
+        if (result.toString().length() > ManagedLobbyStore.MAX_DIRECTORY_CHARS) {
+            throw new IllegalArgumentException("managed lobby owner directory exceeds 512 characters");
+        }
+        return result;
     }
 
     private CompatibilityInput compatibility() {
@@ -256,6 +350,9 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         }
         if (commandContextBridge != null) {
             commandContextBridge.close();
+        }
+        if (managedLobbyCoordinator != null) {
+            managedLobbyCoordinator.close();
         }
         try {
             platformResources.closeAll();

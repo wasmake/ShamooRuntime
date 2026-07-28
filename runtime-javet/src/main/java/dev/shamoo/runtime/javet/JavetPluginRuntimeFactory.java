@@ -9,6 +9,7 @@ import dev.shamoo.runtime.core.PluginRuntimeFactory;
 import dev.shamoo.runtime.core.PlatformOperationResult;
 import dev.shamoo.runtime.core.InvocationAdmission;
 import dev.shamoo.runtime.core.InvocationController;
+import dev.shamoo.runtime.core.InvocationRejectedError;
 import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.core.ResourceCategory;
 import dev.shamoo.runtime.core.ResourceRegistry;
@@ -75,6 +76,8 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
         try {
             ShamooPluginMetadata metadata = ShamooPluginMetadata.from(context.candidate().descriptor(), platform);
             Map<String, HostFunction> hostBindings = new LinkedHashMap<>(bindings.apply(context));
+            hostBindings.replaceAll((name, binding) -> managedHostBinding(
+                    binding, context.resources(), context.candidate().pluginId(), name, context.invocations()));
             AtomicReference<ShamooNodeRuntime> runtimeReference = new AtomicReference<>();
             Map<String, PluginServiceProxy> serviceProxies = new java.util.concurrent.ConcurrentHashMap<>();
             addCoreBindings(context, metadata, hostBindings, runtimeReference, serviceProxies);
@@ -260,6 +263,32 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
 
     static Object normalizePlatformResult(Object result, ResourceRegistry resources, PluginId owner, String name) {
         return normalizePlatformResult(result, resources, owner, name, new CallbackOwnership(), 0);
+    }
+
+    static HostFunction managedHostBinding(HostFunction binding, ResourceRegistry resources, PluginId owner,
+            String name, InvocationController invocations) {
+        Objects.requireNonNull(binding, "binding");
+        Objects.requireNonNull(invocations, "invocations");
+        return arguments -> {
+            InvocationAdmission.Lease lease = null;
+            if (invocations.snapshot().accepting()) {
+                try {
+                    lease = invocations.admit();
+                } catch (InvocationRejectedError failure) {
+                    return CompletableFuture.failedFuture(failure);
+                }
+            }
+            try {
+                Object normalized = normalizePlatformResult(
+                        binding.invoke(arguments, lease != null), resources, owner, name);
+                return keepAdmissionUntilSettled(normalized, lease);
+            } catch (Exception | Error failure) {
+                if (lease != null) {
+                    lease.close();
+                }
+                throw failure;
+            }
+        };
     }
 
     static Object normalizePlatformResult(Object result, ResourceRegistry resources, PluginId owner, String name,

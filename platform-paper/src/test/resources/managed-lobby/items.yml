@@ -1,0 +1,51 @@
+items:
+  - id: selector-juegos
+    slot: 0
+    material: COMPASS
+    amount: 1
+    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Selector de juegos</bold></gradient>'
+    lore:
+      - '<italic:false><#A8B3C7>Explora las modalidades de la red.</#A8B3C7>'
+      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para abrir</#F8FAFC>'
+    cooldown-ms: 500
+    action: { type: menu, target: game-selector }
+  - id: selector-lobbies
+    slot: 1
+    material: NETHER_STAR
+    amount: 1
+    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>✦ Selector de lobbies</bold></gradient>'
+    lore:
+      - '<italic:false><#A8B3C7>Elige otro punto de encuentro.</#A8B3C7>'
+      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para abrir</#F8FAFC>'
+    cooldown-ms: 500
+    action: { type: menu, target: lobby-selector }
+  - id: perfil
+    slot: 4
+    material: PLAYER_HEAD
+    amount: 1
+    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Tu perfil</bold></gradient>'
+    lore:
+      - '<italic:false><#A8B3C7>Consulta tu resumen y preferencias.</#A8B3C7>'
+      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para abrir</#F8FAFC>'
+    cooldown-ms: 500
+    action: { type: menu, target: profile }
+  - id: visibilidad
+    slot: 7
+    material: LIME_DYE
+    amount: 1
+    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Visibilidad</bold></gradient>'
+    lore:
+      - '<italic:false><#A8B3C7>Alterna entre todos, personal y nadie.</#A8B3C7>'
+      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para cambiar</#F8FAFC>'
+    cooldown-ms: 500
+    action: { type: visibility, target: cycle }
+  - id: ajustes
+    slot: 8
+    material: COMPARATOR
+    amount: 1
+    name: '<italic:false><gradient:#38D9FF:#4F7CFF:#A855F7><bold>◆ Ajustes</bold></gradient>'
+    lore:
+      - '<italic:false><#A8B3C7>Personaliza tu experiencia en el lobby.</#A8B3C7>'
+      - '<italic:false><#303746>▸</#303746> <#F8FAFC>Clic para abrir</#F8FAFC>'
+    cooldown-ms: 500
+    action: { type: menu, target: settings }
