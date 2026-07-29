@@ -9,7 +9,8 @@ import java.util.Set;
 public final class ApiGeneratorCli {
     private static final int MINIMUM_ARGUMENTS = 5;
     private static final Set<String> PAPER_PACKAGES = Set.of(
-            "org.bukkit.", "io.papermc.paper.", "com.destroystokyo.paper.", "net.kyori.adventure.");
+            "org.bukkit.", "org.spigotmc.", "io.papermc.paper.", "com.destroystokyo.paper.",
+            "net.kyori.adventure.", "net.md_5.bungee.api.");
     private static final Set<String> VELOCITY_PACKAGES = Set.of(
             "com.velocitypowered.api.", "net.kyori.adventure.");
 

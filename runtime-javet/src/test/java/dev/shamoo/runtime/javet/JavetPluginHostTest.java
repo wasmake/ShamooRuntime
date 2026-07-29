@@ -83,7 +83,7 @@ class JavetPluginHostTest {
         Path managed = plugin("managed-binding",
                 "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}", """
                 export async function load() {
-                  const result = await host.paperManagedLobby({world: 'spawn'});
+                  const result = await host.customBinding({world: 'spawn'});
                   host.record(result.status + ':' + result.world);
                 }
                 """);
@@ -93,7 +93,7 @@ class JavetPluginHostTest {
                 Set.of(), runtime, runtime, ProtocolVersion.CURRENT);
         try (JavetPluginHost host = new JavetPluginHost(plugins, input, PlatformCapabilities.NONE, Duration.ZERO,
                 Duration.ofSeconds(3), context -> Map.of(
-                        "paperManagedLobby", arguments -> {
+                        "customBinding", arguments -> {
                             requests.add(List.copyOf(arguments));
                             if (requests.size() == FIRST_REQUEST_COUNT) {
                                 return firstRegistration;
@@ -118,7 +118,7 @@ class JavetPluginHostTest {
             assertEquals(1, host.snapshots().getFirst().resources().size());
             Files.writeString(managed.resolve("index.js"), """
                     export async function load() {
-                      await host.paperManagedLobby({world: 'failed'});
+                      await host.customBinding({world: 'failed'});
                     }
                     export function ready() { throw new Error('candidate failed'); }
                     """);

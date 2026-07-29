@@ -1,15 +1,10 @@
 package dev.shamoo.runtime.bootstrap.paper;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.javet.HostedPluginStatus;
 import java.lang.reflect.Method;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -53,37 +48,6 @@ class ShamooPaperPluginTest {
         assertEquals(NamedTextColor.GREEN, active.color());
         assertEquals("inactive", inactive.content());
         assertEquals(NamedTextColor.GRAY, inactive.color());
-    }
-
-    @Test
-    void confinesTheFinalOwnerDirectoryAndBoundsItsContractPath() throws Exception {
-        Path plugins = temporary.resolve("plugins");
-        Files.createDirectories(plugins);
-        Path data = temporary.resolve("data");
-
-        assertEquals(data.resolve("shalobby"), ShamooPaperPlugin.confinedManagedLobbyDirectory(
-                data, plugins, new PluginId("shalobby")));
-        assertThrows(IllegalArgumentException.class, () -> ShamooPaperPlugin.confinedManagedLobbyDirectory(
-                temporary, plugins, new PluginId("plugins")));
-
-        Path oversized = temporary;
-        for (int index = 0; index < 9; index++) {
-            oversized = oversized.resolve("x".repeat(60));
-        }
-        Path oversizedRoot = oversized;
-        assertThrows(IllegalArgumentException.class, () -> ShamooPaperPlugin.confinedManagedLobbyDirectory(
-                oversizedRoot, plugins, new PluginId("shalobby")));
-    }
-
-    @Test
-    void rejectsEnabledManagedLobbyOnFoliaOnly() {
-        assertTrue(ShamooPaperPlugin.isFolia("Folia", false));
-        assertTrue(ShamooPaperPlugin.isFolia("Paper", true));
-        assertFalse(ShamooPaperPlugin.isFolia("Paper", false));
-        assertThrows(IllegalStateException.class,
-                () -> ShamooPaperPlugin.requireManagedLobbyPlatform(true, true));
-        assertDoesNotThrow(() -> ShamooPaperPlugin.requireManagedLobbyPlatform(false, true));
-        assertDoesNotThrow(() -> ShamooPaperPlugin.requireManagedLobbyPlatform(true, false));
     }
 
 }

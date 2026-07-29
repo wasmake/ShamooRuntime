@@ -88,6 +88,7 @@ public final class ShamooNodeRuntime implements AutoCloseable {
     private final RuntimeErrorReporter errorReporter;
     private final ThreadPoolExecutor executor;
     private final Object admissionLock = new Object();
+    private final Object completionLock = new Object();
     private final Object creationLock = new Object();
     private final AtomicReference<RuntimeState> state = new AtomicReference<>(RuntimeState.CREATING);
     private final AtomicInteger activeInvocations = new AtomicInteger();
@@ -106,6 +107,7 @@ public final class ShamooNodeRuntime implements AutoCloseable {
     private final java.util.Queue<Runnable> isolateCompletions =
             new java.util.concurrent.ConcurrentLinkedQueue<>();
     private final CompletableFuture<Void> closeCompletion = new CompletableFuture<>();
+    private final AtomicInteger awaitingPromises = new AtomicInteger();
     private volatile Thread ownerThread;
     private RuntimeCreationError creationAbort;
     private NodeRuntime nodeRuntime;
@@ -275,17 +277,47 @@ public final class ShamooNodeRuntime implements AutoCloseable {
     @SuppressWarnings("try")
     public CompletableFuture<Object> invokeCallback(String name, List<Object> arguments) {
         Objects.requireNonNull(name, "name");
-        List<Object> copied = java.util.Collections.unmodifiableList(new ArrayList<>(arguments));
-        return submit(() -> {
-            assertOwnerThread();
-            V8ValueFunction function = javaProxyRegistry.callback(name);
-            try (V8Guard guard = invocationGuard();
-                    V8Value result = function.callExtended(nodeRuntime.getGlobalObject(), true, copied.toArray())) {
-                return awaitAndConvert(result);
-            } catch (JavetException exception) {
-                throw translateEvaluation(exception, "callback:" + name);
-            }
-        });
+        @SuppressWarnings("unchecked")
+        List<Object> copied = (List<Object>) JavaProxyRegistry.requireDataValue(
+                java.util.Collections.unmodifiableList(new ArrayList<>(arguments)), "callback arguments");
+        if (Thread.currentThread() != ownerThread) {
+            CompletableFuture<Object> nested = new CompletableFuture<>();
+            Runnable completion = () -> invokeCallbackOnOwner(name, copied, nested);
+            enqueueIsolateCompletion(completion).whenComplete((ignored, failure) -> {
+                if (failure != null && isolateCompletions.remove(completion)) {
+                    nested.completeExceptionally(unwrapCompletionFailure(failure));
+                }
+            });
+            return nested;
+        }
+        return submit(() -> invokeCallbackOnOwner(name, copied));
+    }
+
+    @SuppressWarnings("try")
+    private Object invokeCallbackOnOwner(String name, List<Object> arguments) throws JavetException {
+        assertOwnerThread();
+        V8ValueFunction function = javaProxyRegistry.callback(name);
+        try (V8Guard guard = invocationGuard();
+                V8Value result = function.callExtended(nodeRuntime.getGlobalObject(), true, arguments.toArray())) {
+            return JavaProxyRegistry.requireDataValue(awaitAndConvert(result), "callback return value");
+        } catch (JavetException exception) {
+            throw translateEvaluation(exception, "callback:" + name);
+        }
+    }
+
+    private void invokeCallbackOnOwner(String name, List<Object> arguments, CompletableFuture<Object> result) {
+        if (result.isDone()) {
+            return;
+        }
+        activeInvocations.incrementAndGet();
+        try {
+            result.complete(invokeCallbackOnOwner(name, arguments));
+        } catch (Throwable failure) {
+            result.completeExceptionally(failure);
+        } finally {
+            activeInvocations.decrementAndGet();
+            completedInvocations.incrementAndGet();
+        }
     }
 
     /** Releases one retained JS callback on the isolate owner thread. */
@@ -298,12 +330,29 @@ public final class ShamooNodeRuntime implements AutoCloseable {
     }
 
     public CompletableFuture<String> readTextFile(String relativePath) {
+        if (Thread.currentThread() == ownerThread) {
+            try {
+                return CompletableFuture.completedFuture(readSecureFile(
+                        policyRelativePath(relativePath, permissions.readablePaths(), "read"), relativePath));
+            } catch (RuntimeException failure) {
+                return CompletableFuture.failedFuture(failure);
+            }
+        }
         return submit(() -> readSecureFile(
             policyRelativePath(relativePath, permissions.readablePaths(), "read"), relativePath));
     }
 
     public CompletableFuture<Void> writeTextFile(String relativePath, String contents) {
         Objects.requireNonNull(contents, "contents");
+        if (Thread.currentThread() == ownerThread) {
+            try {
+                writeSecureFile(policyRelativePath(relativePath, permissions.writablePaths(), "write"),
+                        relativePath, contents);
+                return CompletableFuture.completedFuture(null);
+            } catch (RuntimeException failure) {
+                return CompletableFuture.failedFuture(failure);
+            }
+        }
         return submit(() -> {
             writeSecureFile(
                 policyRelativePath(relativePath, permissions.writablePaths(), "write"), relativePath, contents);
@@ -438,13 +487,16 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             awaitedRejectionHandler = nodeRuntime.getExecutor("(error) => undefined").execute();
             resources.register(awaitedRejectionHandler);
             installUncaughtExceptionReporter();
-            javaProxyRegistry = resources.register(new JavaProxyRegistry(nodeRuntime, isolateCompletions::add));
+            javaProxyRegistry = resources.register(new JavaProxyRegistry(nodeRuntime, this::enqueueIsolateCompletion));
             for (Map.Entry<String, HostFunction> binding : Map.copyOf(hostBindings).entrySet()) {
                 javaProxyRegistry.register(binding.getKey(), binding.getValue());
             }
             nodeRuntime.getExecutor("Object.setPrototypeOf(host, null); Object.freeze(host);"
                     + "Object.defineProperty(globalThis, 'host', {value: host, writable: false, configurable: false});")
                     .executeVoid();
+            nodeRuntime.getExecutor("Object.defineProperty(globalThis, Symbol.for('shamoo.paper.frame-context'), {"
+                    + "value: new (require('node:async_hooks').AsyncLocalStorage)(), writable: false, "
+                    + "configurable: false});").executeVoid();
             removeUnsafeGlobals();
         }
     }
@@ -667,18 +719,51 @@ public final class ShamooNodeRuntime implements AutoCloseable {
         try (V8ValuePromise ignored = promise._catch(awaitedRejectionHandler)) {
             // The native Node rejection tracker requires a real JavaScript rejection handler.
         }
-        while (promise.isPending()) {
-            drainIsolateCompletions();
-            nodeRuntime.await(V8AwaitMode.RunOnce);
-        }
-        drainIsolateCompletions();
-        try (V8Value promiseResult = promise.getResult()) {
-            if (promise.isRejected()) {
-                throw new RuntimeEvaluationError(
-                    pluginId, "promise rejected: " + errorText(promiseResult), null, valueStack(promiseResult), null);
+        awaitingPromises.incrementAndGet();
+        try {
+            while (promise.isPending()) {
+                drainIsolateCompletions();
+                nodeRuntime.await(V8AwaitMode.RunOnce);
             }
-            return nodeRuntime.toObject(promiseResult);
+            drainIsolateCompletions();
+            try (V8Value promiseResult = promise.getResult()) {
+                if (promise.isRejected()) {
+                    throw new RuntimeEvaluationError(
+                        pluginId, "promise rejected: " + errorText(promiseResult), null,
+                        valueStack(promiseResult), null);
+                }
+                return nodeRuntime.toObject(promiseResult);
+            }
+        } finally {
+            synchronized (completionLock) {
+                awaitingPromises.decrementAndGet();
+            }
+            drainIsolateCompletions();
         }
+    }
+
+    private CompletableFuture<Void> enqueueIsolateCompletion(Runnable completion) {
+        boolean wake;
+        synchronized (completionLock) {
+            isolateCompletions.add(completion);
+            wake = awaitingPromises.get() == 0;
+        }
+        if (!wake) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return submit(() -> {
+            drainIsolateCompletions();
+            return null;
+        });
+    }
+
+    private static Throwable unwrapCompletionFailure(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof java.util.concurrent.CompletionException
+                || current instanceof java.util.concurrent.ExecutionException) && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private void drainIsolateCompletions() {
@@ -1054,7 +1139,9 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             activeInvocations.incrementAndGet();
             try {
                 assertOwnerThread();
-                future.complete(callable.call());
+                if (!future.isDone()) {
+                    future.complete(callable.call());
+                }
             } catch (Throwable throwable) {
                 future.completeExceptionally(throwable);
             } finally {

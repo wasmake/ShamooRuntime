@@ -10,13 +10,13 @@ load their classes. Run:
 ./gradlew :runtime-codegen-support:diffPlatformApis
 ```
 
-Canonical `model.json` files follow `@shamoo/platform-codegen`'s `JvmApiModel` schema version 1 and are sorted and
+Canonical `model.json` files follow `@shamoo/platform-codegen`'s `JvmApiModel` schema version 2 and are sorted and
 reproducible. Coverage denominators come from the scanner inventory captured before model serialization; generation
 fails if an eligible declaration or member is omitted. Coverage also reports exceptions, events, packets, and packet
 registrations. The Paper and Velocity bootstrap JARs package only their own public model.
 
-The checked-in pinned surfaces contain 2,165 Paper declarations, 30,370 members, and 422 events, plus 358 Velocity
-declarations, 2,664 members, and 46 events. A changed pinned artifact changes these files and `diffPlatformApis` fails.
+The checked-in pinned surfaces contain 2,215 Paper declarations, 30,315 members, and 423 events, plus 358 Velocity
+declarations, 2,512 members, and 46 events. A changed pinned artifact changes these files and `diffPlatformApis` fails.
 
 ## Paper
 
@@ -39,21 +39,22 @@ creating JVM-owned Adventure components. Click callbacks have bounded uses and l
 data-only sender context. `PaperUiBridge` creates protected inventories and item stacks on the JVM, stores only opaque
 action identifiers in persistent item data, cancels configured click/drag/interact behavior, and closes viewers and
 callback mappings with the owning generation. Command/action sender tokens exist only while their script completion is
-active; no `CommandSender`, `Player`, `Component`, `Inventory`, or `ItemStack` crosses into JavaScript.
+active. These specialized bridges do not expose raw Javet Java proxies; the generic generated bridge represents native
+values with generation-scoped opaque handles.
 
-The optional production managed-lobby bridge is documented in [managed-lobby.md](managed-lobby.md). It is a direct,
-owner-gated custom binding rather than a generated general-purpose API and keeps all synchronous lobby cancellation in
-native Paper listeners. Unlike the generic Paper adapter, this optional feature supports standard Paper 1.21.8 only and
-causes startup to fail before managed defaults are generated when enabled on Folia.
+The generated Paper bridge gives every script generation the same public API catalog. Java values remain
+generation-scoped opaque handles and calls are scheduler-routed or executed in a bounded synchronous event frame;
+Runtime never installs an owner-specific gameplay binding.
 
 Bootstraps publish only named platform operations into Javet. Every invocation requires generated namespace/type and
 protocol metadata, binds ownership to the calling plugin, and registers listeners, commands, tasks, channels, and packet
-subscriptions in `ResourceRegistry`; server, proxy, registrar, scheduler, and packet registry objects are never exposed.
+subscriptions in `ResourceRegistry`; live JVM objects cross only as unforgeable generation-scoped handle records.
 Script dispatchers are explicit registered callback names. Nested text/UI callback markers are recursively adapted
 only inside an exactly authorized generated operation. Paper event callbacks are synchronously joined in the
 native event frame, scheduled work uses Paper/Folia schedulers, and Velocity event callbacks return the native
-continuation stage. Only copied scalar/list/map/byte carriers cross the isolate boundary. Paper proxy requests select
-an eligible online player automatically rather than exposing a `Player` carrier to JS.
+continuation stage. Only copied scalar/list/map/byte carriers and opaque handle/callback markers cross the isolate
+boundary. Paper proxy requests select an eligible online player automatically rather than exposing a raw `Player`
+proxy to JavaScript.
 
 Generated invocation identities are cached on immutable strings and protocol values, never event classes, plugin
 instances, runtimes, or class loaders. Paper packet subscribers use a copy-on-write array prepared only when

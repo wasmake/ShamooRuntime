@@ -179,9 +179,9 @@ public final class ApiDescriptorWriter {
             List<Map<String, Object>> methods = new ArrayList<>();
             for (ApiMethod method : type.methods()) {
                 if ("<init>".equals(method.name())) {
-                    constructors.add(constructor(method));
+                    constructors.add(constructor(type.name(), method));
                 } else {
-                    methods.add(method(method));
+                    methods.add(method(type.name(), method));
                 }
             }
             if (!constructors.isEmpty()) {
@@ -194,7 +194,9 @@ public final class ApiDescriptorWriter {
                     .filter(field -> (field.access() & Opcodes.ACC_ENUM) == 0)
                     .map(field -> {
                         Map<String, Object> item = new LinkedHashMap<>();
+                        item.put("id", type.name() + "#" + field.name() + ":" + field.descriptor());
                         item.put("name", field.name());
+                        item.put("descriptor", field.descriptor());
                         item.put("type", JvmSignatures.field(field.signature(), field.descriptor()));
                         optionalTrue(item, "static", (field.access() & Opcodes.ACC_STATIC) != 0);
                         optionalTrue(item, "readonly", (field.access() & Opcodes.ACC_FINAL) != 0);
@@ -223,9 +225,11 @@ public final class ApiDescriptorWriter {
         return result;
     }
 
-    private static Map<String, Object> constructor(ApiMethod method) {
+    private static Map<String, Object> constructor(String owner, ApiMethod method) {
         JvmSignatures.MethodTypes signature = JvmSignatures.method(method.signature(), method.descriptor());
         Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", owner + "#<init>" + method.descriptor());
+        result.put("descriptor", method.descriptor());
         result.put("parameters", parameters(method, signature.parameters()));
         if (!signature.typeParameters().isEmpty()) {
             result.put("typeParameters", typeParameters(signature.typeParameters()));
@@ -236,10 +240,12 @@ public final class ApiDescriptorWriter {
         return result;
     }
 
-    private static Map<String, Object> method(ApiMethod method) {
+    private static Map<String, Object> method(String owner, ApiMethod method) {
         JvmSignatures.MethodTypes signature = JvmSignatures.method(method.signature(), method.descriptor());
         Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", owner + "#" + method.name() + method.descriptor());
         result.put("name", method.name());
+        result.put("descriptor", method.descriptor());
         result.put("parameters", parameters(method, signature.parameters()));
         result.put("returns", signature.returns());
         optionalTrue(result, "nullable", method.annotations().stream().anyMatch(annotation ->

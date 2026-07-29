@@ -26,7 +26,7 @@ public record ApiModel(String platform, List<ApiType> types, Inventory inventory
         return List.copyOf(types);
     }
 
-    /** A public API type and all supported public/protected members present in its class file. */
+    /** A public API type and all public members present in its class file. */
     @SuppressWarnings("PMD.OverrideBothEqualsAndHashCodeOnComparable")
     public record ApiType(
             String name,

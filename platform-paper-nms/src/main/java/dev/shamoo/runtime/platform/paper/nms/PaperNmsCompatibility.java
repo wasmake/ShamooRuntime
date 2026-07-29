@@ -8,7 +8,7 @@ public final class PaperNmsCompatibility {
     public static final String MINECRAFT_VERSION = "1.21.8";
     public static final int PAPER_BUILD = 55;
     public static final String PACKET_MODEL_SHA256 =
-            "bd1ab22deba93303194434de35d109ccb6f63c20ecd2b1e32b17bca35df87350";
+            "efef7272e33bf35bf213dc465b4b50783594dac8dd71ea85e2cb4ea0779c0138";
 
     private PaperNmsCompatibility() {
     }

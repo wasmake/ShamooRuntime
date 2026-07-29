@@ -11,8 +11,7 @@ packets:
   timeout-millis: 50
   maximum-pending: 256
 
-managed-lobby:
-  enabled: false
-  owner: shalobby
-  data-directory: data
-  maximum-pending-actions: 64
+paper-api:
+  synchronous-timeout-millis: 100
+  maximum-pending-frame-calls: 256
+  maximum-handles: 65536

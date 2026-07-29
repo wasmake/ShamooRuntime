@@ -75,10 +75,11 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
         Objects.requireNonNull(context, "context");
         try {
             ShamooPluginMetadata metadata = ShamooPluginMetadata.from(context.candidate().descriptor(), platform);
+            AtomicReference<ShamooNodeRuntime> runtimeReference = new AtomicReference<>();
             Map<String, HostFunction> hostBindings = new LinkedHashMap<>(bindings.apply(context));
             hostBindings.replaceAll((name, binding) -> managedHostBinding(
-                    binding, context.resources(), context.candidate().pluginId(), name, context.invocations()));
-            AtomicReference<ShamooNodeRuntime> runtimeReference = new AtomicReference<>();
+                    binding, context.resources(), context.candidate().pluginId(), name, context.invocations(),
+                    runtimeReference));
             Map<String, PluginServiceProxy> serviceProxies = new java.util.concurrent.ConcurrentHashMap<>();
             addCoreBindings(context, metadata, hostBindings, runtimeReference, serviceProxies);
             context.platformCapabilities().operations().forEach((name, operation) -> {
@@ -96,8 +97,11 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
                     try {
                         adapted = adaptCallbacks(arguments.subList(1, arguments.size()),
                                 runtimeReference, context.invocations());
-                        Object result = context.platformCapabilities().invoke(name, context.candidate().pluginId(),
-                                parsedBinding, adapted.values());
+                        AdaptedArguments invocationArguments = adapted;
+                        Object result = dev.shamoo.runtime.core.PlatformInvocationScope.invoke(
+                                context.generationId(), () -> context.platformCapabilities().invoke(
+                                        name, context.candidate().pluginId(), parsedBinding,
+                                        invocationArguments.values()));
                         Object normalized = normalizePlatformResult(result, context.resources(),
                                 context.candidate().pluginId(), name, adapted.ownership(), 0);
                         return keepAdmissionUntilSettled(normalized, lease);
@@ -267,10 +271,16 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
 
     static HostFunction managedHostBinding(HostFunction binding, ResourceRegistry resources, PluginId owner,
             String name, InvocationController invocations) {
+        return managedHostBinding(binding, resources, owner, name, invocations, null);
+    }
+
+    private static HostFunction managedHostBinding(HostFunction binding, ResourceRegistry resources, PluginId owner,
+            String name, InvocationController invocations, AtomicReference<ShamooNodeRuntime> runtime) {
         Objects.requireNonNull(binding, "binding");
         Objects.requireNonNull(invocations, "invocations");
         return arguments -> {
             InvocationAdmission.Lease lease = null;
+            AdaptedArguments adapted = null;
             if (invocations.snapshot().accepting()) {
                 try {
                     lease = invocations.admit();
@@ -279,10 +289,17 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
                 }
             }
             try {
+                adapted = runtime == null
+                        ? new AdaptedArguments(arguments, new CallbackOwnership())
+                        : adaptCallbacks(arguments, runtime, invocations);
                 Object normalized = normalizePlatformResult(
-                        binding.invoke(arguments, lease != null), resources, owner, name);
+                        binding.invoke(adapted.values(), lease != null), resources, owner, name,
+                        adapted.ownership(), 0);
                 return keepAdmissionUntilSettled(normalized, lease);
             } catch (Exception | Error failure) {
+                if (adapted != null) {
+                    adapted.ownership().close();
+                }
                 if (lease != null) {
                     lease.close();
                 }

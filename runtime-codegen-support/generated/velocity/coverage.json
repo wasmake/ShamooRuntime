@@ -7,8 +7,8 @@
     "percent" : 100
   },
   "members" : {
-    "expected" : 2552,
-    "emitted" : 2552,
+    "expected" : 2512,
+    "emitted" : 2512,
     "percent" : 100
   },
   "events" : {

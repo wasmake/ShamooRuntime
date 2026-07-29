@@ -21,6 +21,7 @@ velocityApi.isTransitive = false
 dependencies {
     paperApi(libs.paper.api)
     paperApi(libs.paper.adventure.api)
+    paperApi(libs.paper.adventure.minimessage)
     velocityApi(libs.velocity.api)
     velocityApi(libs.velocity.adventure.api)
 }
@@ -78,6 +79,10 @@ tasks.register("verifyPlatformApiCoverage") {
     group = "verification"
     description = "Verify Paper and Velocity generated API coverage independently"
     dependsOn(verifyPaperApiCoverage, verifyVelocityApiCoverage)
+}
+
+tasks.named("check") {
+    dependsOn("verifyPlatformApiCoverage", "diffPlatformApis")
 }
 
 tasks.register("syncPlatformApis") {

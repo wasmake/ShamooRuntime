@@ -6,6 +6,6 @@
   "mache": "1.21.8+build.2",
   "mapping": "mojang",
   "mappedServerSha256": "56146a5282b5fc25fc1132f1195b6b50751b34323f0201fe175764f30f0b3be4",
-  "packetModelSha256": "bd1ab22deba93303194434de35d109ccb6f63c20ecd2b1e32b17bca35df87350",
+  "packetModelSha256": "efef7272e33bf35bf213dc465b4b50783594dac8dd71ea85e2cb4ea0779c0138",
   "pipelineAnchor": "packet_handler"
 }
