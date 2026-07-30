@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,19 +21,25 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import org.bukkit.Server;
+import org.bukkit.event.Event;
+import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.junit.jupiter.api.Test;
 
-@SuppressWarnings({"PMD.AvoidDuplicateLiterals", "PMD.CloseResource",
+@SuppressWarnings({"PMD.AvoidCatchingThrowable", "PMD.AvoidDuplicateLiterals", "PMD.CloseResource",
         "PMD.UnitTestAssertionsShouldIncludeMessage", "PMD.UnitTestContainsTooManyAsserts",
         "PMD.UseProperClassLoader"})
 class PaperJavaBridgeTest {
     private static final String FIXTURE = "dev.shamoo.runtime.platform.paper.PaperJavaBridgeTest$Fixture";
+    private static final String FIXTURE_EVENT =
+            "dev.shamoo.runtime.platform.paper.PaperJavaBridgeTest$FixtureEvent";
 
     @Test
     void constructsAndInvokesOnlyCataloguedMembersThroughTheScheduler() throws IOException {
@@ -118,6 +125,109 @@ class PaperJavaBridgeTest {
         assertThrows(IllegalStateException.class, () -> bridge.invoke(List.of(Map.of("operation", "describe"))));
     }
 
+    @Test
+    void keepsEventDerivedHandlesInTheOriginatingFrame() throws Exception {
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        Server server = mock(Server.class);
+        GlobalRegionScheduler scheduler = mock(GlobalRegionScheduler.class);
+        ScheduledTask task = mock(ScheduledTask.class);
+        when(plugin.getServer()).thenReturn(server);
+        Thread originThread = Thread.currentThread();
+        when(server.isGlobalTickThread()).thenAnswer(ignored -> Thread.currentThread().equals(originThread));
+        when(server.getGlobalRegionScheduler()).thenReturn(scheduler);
+        when(scheduler.run(eq(plugin), any())).thenReturn(task);
+        PaperJavaBridge bridge = new PaperJavaBridge(plugin, new PluginId("fixture"), UUID.randomUUID(),
+                registry(), Duration.ofSeconds(1), 8, 32);
+        AtomicReference<Thread> scriptThread = new AtomicReference<>();
+        AtomicReference<Map<?, ?>> returnedFixture = new AtomicReference<>();
+
+        bridge.dispatchEvent(new FixtureEvent(), arguments -> {
+            CompletableFuture<Object> result = new CompletableFuture<>();
+            scriptThread.set(new Thread(() -> {
+                try {
+                    Map<?, ?> event = assertInstanceOf(Map.class, arguments.getFirst());
+                    Map<?, ?> fixture = stage(bridge.invoke(List.of(Map.of(
+                            "operation", "invoke",
+                            "type", FIXTURE_EVENT,
+                            "name", "fixture",
+                            "descriptor", "()L" + FIXTURE.replace('.', '/') + ";",
+                            "target", event,
+                            "arguments", List.of()))));
+                    returnedFixture.set(fixture);
+                    result.complete(stage(bridge.invoke(List.of(Map.of(
+                            "operation", "invoke",
+                            "type", FIXTURE,
+                            "name", "length",
+                            "descriptor", "()I",
+                            "target", fixture,
+                            "arguments", List.of())))));
+                } catch (Throwable failure) {
+                    result.completeExceptionally(failure);
+                }
+            }));
+            scriptThread.get().start();
+            return result;
+        });
+
+        scriptThread.get().join();
+        verifyNoInteractions(scheduler);
+        int detachedLength = stage(bridge.invoke(List.of(Map.of(
+                "operation", "invoke",
+                "type", FIXTURE,
+                "name", "length",
+                "descriptor", "()I",
+                "target", returnedFixture.get(),
+                "arguments", List.of()))));
+        assertEquals(0, detachedLength);
+        assertEquals(true, bridge.invoke(List.of(Map.of(
+                "operation", "release",
+                "handle", returnedFixture.get().get("$paperHandle")))));
+        Map<?, ?> description = assertInstanceOf(Map.class,
+                bridge.invoke(List.of(Map.of("operation", "describe"))));
+        assertEquals(0, description.get("handles"));
+        bridge.close();
+    }
+
+    @Test
+    void rejectsHandlesReturnedAfterTheirFrameExpires() throws Exception {
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        PaperJavaBridge bridge = new PaperJavaBridge(plugin, new PluginId("fixture"), UUID.randomUUID(),
+                registry(), Duration.ofSeconds(1), 8, 32);
+        FixtureEvent event = new FixtureEvent();
+        AtomicReference<CompletionStage<Object>> pending = new AtomicReference<>();
+
+        bridge.dispatchEvent(event, arguments -> {
+            pending.set(stageValue(bridge.invoke(List.of(Map.of(
+                    "operation", "invoke",
+                    "type", FIXTURE_EVENT,
+                    "name", "delayedFixture",
+                    "descriptor", "()Ljava/util/concurrent/CompletionStage;",
+                    "target", arguments.getFirst(),
+                    "arguments", List.of())))));
+            return CompletableFuture.completedFuture(null);
+        });
+        event.completeDelayedFixture();
+
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> pending.get().toCompletableFuture().join());
+        assertInstanceOf(IllegalStateException.class, failure.getCause());
+        Map<?, ?> description = assertInstanceOf(Map.class,
+                bridge.invoke(List.of(Map.of("operation", "describe"))));
+        assertEquals(0, description.get("handles"));
+        bridge.close();
+    }
+
+    private static <T> T stage(Object value) {
+        @SuppressWarnings("unchecked")
+        T result = (T) stageValue(value).toCompletableFuture().join();
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static CompletionStage<Object> stageValue(Object value) {
+        return (CompletionStage<Object>) assertInstanceOf(CompletionStage.class, value);
+    }
+
     private GeneratedPaperApiRegistry registry() throws IOException {
         var model = new ObjectMapper().readTree("""
                 {
@@ -125,9 +235,9 @@ class PaperJavaBridgeTest {
                     "javaName": "%s",
                     "constructors": [{"id": "%s#<init>()V", "descriptor": "()V"}],
                     "methods": [{
-                      "id": "%s#length()I",
-                      "name": "length",
-                      "descriptor": "()I"
+                       "id": "%s#length()I",
+                       "name": "length",
+                       "descriptor": "()I"
                      }, {
                        "id": "%s#echo(J)J",
                        "name": "echo",
@@ -136,10 +246,23 @@ class PaperJavaBridgeTest {
                        "id": "%s#invokeBoolean(Ljava/util/function/BooleanSupplier;)Z",
                        "name": "invokeBoolean",
                        "descriptor": "(Ljava/util/function/BooleanSupplier;)Z"
-                     }]
-                   }]
-                 }
-                """.formatted(FIXTURE, FIXTURE, FIXTURE, FIXTURE, FIXTURE));
+                      }]
+                    }, {
+                      "javaName": "%s",
+                      "methods": [{
+                        "id": "%s#fixture()L%s;",
+                        "name": "fixture",
+                        "descriptor": "()L%s;"
+                      }, {
+                        "id": "%s#delayedFixture()Ljava/util/concurrent/CompletionStage;",
+                        "name": "delayedFixture",
+                        "descriptor": "()Ljava/util/concurrent/CompletionStage;"
+                      }]
+                    }]
+                  }
+                """.formatted(FIXTURE, FIXTURE, FIXTURE, FIXTURE, FIXTURE,
+                        FIXTURE_EVENT, FIXTURE_EVENT, FIXTURE.replace('.', '/'), FIXTURE.replace('.', '/'),
+                        FIXTURE_EVENT));
         return GeneratedPaperApiRegistry.parse(getClass().getClassLoader(), model);
     }
 
@@ -154,6 +277,28 @@ class PaperJavaBridgeTest {
 
         public boolean invokeBoolean(BooleanSupplier callback) {
             return callback.getAsBoolean();
+        }
+    }
+
+    public static final class FixtureEvent extends Event {
+        private static final HandlerList HANDLERS = new HandlerList();
+        private final CompletableFuture<Fixture> delayedResult = new CompletableFuture<>();
+
+        public Fixture fixture() {
+            return new Fixture();
+        }
+
+        public CompletionStage<Fixture> delayedFixture() {
+            return delayedResult.thenApply(value -> value);
+        }
+
+        public void completeDelayedFixture() {
+            delayedResult.complete(new Fixture());
+        }
+
+        @Override
+        public HandlerList getHandlers() {
+            return HANDLERS;
         }
     }
 }
