@@ -109,19 +109,23 @@ class PluginDiscoveryTest {
     }
 
     @Test
-    void rejectsMissingExtraAndNestedArtifactEntries() throws IOException {
+    void rejectsMissingAndExtraRootEntriesWhileStagingNestedPluginData() throws IOException {
         Path missing = createCandidate("missing", "missing");
         Files.delete(missing.resolve(PluginArtifactProtocol.SOURCE_MAP_FILE));
         Path extra = createCandidate("extra", "extra");
         Files.writeString(extra.resolve("README.md"), "extra");
         Path nested = createCandidate("nested", "nested");
-        Files.createDirectory(nested.resolve("dist"));
-        Files.writeString(nested.resolve("dist/other.js"), "export {};");
+        Files.createDirectory(nested.resolve("data"));
+        Files.writeString(nested.resolve("data/config.yml"), "enabled: true");
 
         PluginDiscoveryResult result = new PluginDiscovery(Duration.ZERO).discover(temporaryDirectory);
 
-        assertTrue(result.candidates().isEmpty());
-        assertEquals(3, result.errors().size());
+        assertEquals(1, result.candidates().size());
+        InstalledPluginCandidate candidate = result.candidates().getFirst();
+        assertEquals(new PluginId("nested"), candidate.pluginId());
+        assertEquals("enabled: true", Files.readString(candidate.root().resolve("data/config.yml")));
+        assertTrue(candidate.checksums().containsKey("data/config.yml"));
+        assertEquals(2, result.errors().size());
         assertTrue(result.errors().stream().allMatch(error -> error.code().equals("invalid_candidate_layout")));
     }
 
