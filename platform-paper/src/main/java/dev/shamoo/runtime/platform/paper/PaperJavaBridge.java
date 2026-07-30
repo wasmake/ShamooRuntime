@@ -246,7 +246,7 @@ public final class PaperJavaBridge implements AutoCloseable {
         }
         return raw.thenCompose(PaperJavaBridge::flatten).thenApply(value -> {
             try {
-                return encode(value, null, affinity(value, inheritedAffinity), new EncodeState(), 0);
+                return encodeResult(value, frame, affinity(value, inheritedAffinity), new EncodeState(), 0);
             } catch (RuntimeException | Error failure) {
                 discardNativeResource(value);
                 throw failure;
@@ -772,6 +772,16 @@ public final class PaperJavaBridge implements AutoCloseable {
 
     private Object encode(Object value, PaperInvocationFrame frame, Object inheritedAffinity,
             EncodeState state, int depth) {
+        return encode(value, frame, inheritedAffinity, state, depth, false);
+    }
+
+    private Object encodeResult(Object value, PaperInvocationFrame frame, Object inheritedAffinity,
+            EncodeState state, int depth) {
+        return encode(value, frame, inheritedAffinity, state, depth, true);
+    }
+
+    private Object encode(Object value, PaperInvocationFrame frame, Object inheritedAffinity,
+            EncodeState state, int depth, boolean detachAfterFrame) {
         if (++state.nodes > 100_000 || depth > MAXIMUM_DEPTH) {
             throw new IllegalArgumentException("Paper return value exceeds the data boundary");
         }
@@ -797,7 +807,7 @@ public final class PaperJavaBridge implements AutoCloseable {
         }
         if (value instanceof Optional<?> optional) {
             return optional.isEmpty() ? null
-                    : encode(optional.get(), frame, inheritedAffinity, state, depth + 1);
+                    : encode(optional.get(), frame, inheritedAffinity, state, depth + 1, detachAfterFrame);
         }
         if (state.ancestors.put(value, Boolean.TRUE) != null) {
             throw new IllegalArgumentException("Paper return value contains a cycle");
@@ -809,7 +819,8 @@ public final class PaperJavaBridge implements AutoCloseable {
                 List<Object> result = new ArrayList<>(length);
                 for (int index = 0; index < length; index++) {
                     Object item = Array.get(value, index);
-                    result.add(encode(item, frame, affinity(item, inheritedAffinity), state, depth + 1));
+                    result.add(encode(item, frame, affinity(item, inheritedAffinity), state, depth + 1,
+                            detachAfterFrame));
                 }
                 return Collections.unmodifiableList(result);
             }
@@ -817,7 +828,8 @@ public final class PaperJavaBridge implements AutoCloseable {
                 requireCollectionSize(collection.size());
                 List<Object> result = new ArrayList<>(collection.size());
                 for (Object item : collection) {
-                    result.add(encode(item, frame, affinity(item, inheritedAffinity), state, depth + 1));
+                    result.add(encode(item, frame, affinity(item, inheritedAffinity), state, depth + 1,
+                            detachAfterFrame));
                 }
                 return Collections.unmodifiableList(result);
             }
@@ -825,28 +837,37 @@ public final class PaperJavaBridge implements AutoCloseable {
                 requireCollectionSize(map.size());
                 List<Object> entries = new ArrayList<>(map.size());
                 map.forEach((key, item) -> entries.add(List.of(
-                        encode(key, frame, affinity(key, inheritedAffinity), state, depth + 1),
-                        encode(item, frame, affinity(item, inheritedAffinity), state, depth + 1))));
+                        encode(key, frame, affinity(key, inheritedAffinity), state, depth + 1, detachAfterFrame),
+                        encode(item, frame, affinity(item, inheritedAffinity), state, depth + 1,
+                                detachAfterFrame))));
                 return Map.of("$paperMap", entries);
             }
             return encodeHandle(value, registry.exposedType(value.getClass()), frame,
-                    affinity(value, inheritedAffinity));
+                    affinity(value, inheritedAffinity), detachAfterFrame);
         } finally {
             state.ancestors.remove(value);
         }
     }
 
     private Object encodeHandle(Object value, String type, PaperInvocationFrame frame, Object affinity) {
+        return encodeHandle(value, type, frame, affinity, false);
+    }
+
+    private Object encodeHandle(Object value, String type, PaperInvocationFrame frame, Object affinity,
+            boolean detachAfterFrame) {
         String id;
         String identity;
         synchronized (lifecycleLock) {
             requireOpen();
+            if (frame != null && frames.get(frame.id()) != frame) {
+                throw new IllegalStateException("Paper invocation frame has expired");
+            }
             if (handles.size() >= maximumHandles) {
                 throw new IllegalStateException("Paper handle limit is exhausted");
             }
             id = UUID.randomUUID().toString();
             identity = identities.computeIfAbsent(value, ignored -> UUID.randomUUID().toString());
-            handles.put(id, new Handle(value, type, frame, affinity, identity));
+            handles.put(id, new Handle(value, type, frame, affinity, identity, detachAfterFrame));
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put(HANDLE, id);
@@ -873,12 +894,16 @@ public final class PaperJavaBridge implements AutoCloseable {
         frame.close();
         synchronized (lifecycleLock) {
             List<Handle> removed = new ArrayList<>();
-            handles.entrySet().removeIf(entry -> {
-                if (entry.getValue().frame() != frame) {
-                    return false;
+            handles.forEach((id, handle) -> {
+                if (handle.frame() != frame) {
+                    return;
                 }
-                removed.add(entry.getValue());
-                return true;
+                // Results use the live callback thread, then resume normal scheduler routing.
+                if (handle.detachAfterFrame()) {
+                    handles.replace(id, handle, handle.detached());
+                } else if (handles.remove(id, handle)) {
+                    removed.add(handle);
+                }
             });
             removed.forEach(this::forgetIdentity);
         }
@@ -1100,7 +1125,11 @@ public final class PaperJavaBridge implements AutoCloseable {
     private record ResolvedMember(GeneratedPaperApiRegistry.Member member) {
     }
 
-    private record Handle(Object value, String type, PaperInvocationFrame frame, Object affinity, String identity) {
+    private record Handle(Object value, String type, PaperInvocationFrame frame, Object affinity, String identity,
+            boolean detachAfterFrame) {
+        private Handle detached() {
+            return new Handle(value, type, null, affinity, identity, false);
+        }
     }
 
     private record LegacyTask(int id) {

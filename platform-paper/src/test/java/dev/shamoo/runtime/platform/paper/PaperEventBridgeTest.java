@@ -1,6 +1,7 @@
 package dev.shamoo.runtime.platform.paper;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -15,12 +16,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.bukkit.Server;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventException;
+import org.bukkit.event.HandlerList;
 import org.bukkit.event.EventPriority;
 import org.bukkit.plugin.EventExecutor;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.junit.jupiter.api.Test;
 
+@SuppressWarnings({"PMD.UnitTestAssertionsShouldIncludeMessage", "PMD.UnitTestContainsTooManyAsserts"})
 class PaperEventBridgeTest {
     private static final PluginId OWNER = new PluginId("fixture");
 
@@ -46,7 +49,25 @@ class PaperEventBridgeTest {
         }
     }
 
+    @Test
+    void ignoresEventsThatOnlyShareTheRegisteredHandlerList() throws EventException {
+        AtomicReference<Event> dispatched = new AtomicReference<>();
+        try (Fixture fixture = fixture(FixtureEvent.class, dispatched::set)) {
+            fixture.executor().execute(null, mock(Event.class));
+            assertEquals(null, dispatched.get());
+
+            FixtureEvent expected = new FixtureEvent();
+            fixture.executor().execute(null, expected);
+            assertEquals(expected, dispatched.get());
+        }
+    }
+
     private Fixture fixture(PaperEventBridge.SynchronousEventDispatcher dispatcher) {
+        return fixture(Event.class, dispatcher);
+    }
+
+    private Fixture fixture(Class<? extends Event> eventType,
+            PaperEventBridge.SynchronousEventDispatcher dispatcher) {
         JavaPlugin plugin = mock(JavaPlugin.class);
         Server server = mock(Server.class);
         PluginManager pluginManager = mock(PluginManager.class);
@@ -56,12 +77,12 @@ class PaperEventBridgeTest {
         doAnswer(invocation -> {
             executor.set(invocation.getArgument(3, EventExecutor.class));
             return null;
-        }).when(pluginManager).registerEvent(eq(Event.class), any(), eq(EventPriority.NORMAL), any(), eq(plugin),
+        }).when(pluginManager).registerEvent(eq(eventType), any(), eq(EventPriority.NORMAL), any(), eq(plugin),
                 eq(true));
         PaperEventBridge bridge = new PaperEventBridge(plugin, new ResourceRegistry());
 
         PaperEventBridge.Subscription subscription = bridge.subscribe(
-                OWNER, Event.class, EventPriority.NORMAL, false, dispatcher);
+                OWNER, eventType, EventPriority.NORMAL, false, dispatcher);
 
         return new Fixture(executor.get(), subscription);
     }
@@ -71,6 +92,15 @@ class PaperEventBridgeTest {
         @Override
         public void close() {
             subscription.close();
+        }
+    }
+
+    private static final class FixtureEvent extends Event {
+        private static final HandlerList HANDLERS = new HandlerList();
+
+        @Override
+        public HandlerList getHandlers() {
+            return HANDLERS;
         }
     }
 }

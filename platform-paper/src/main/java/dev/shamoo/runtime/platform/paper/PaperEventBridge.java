@@ -31,6 +31,9 @@ public final class PaperEventBridge {
         Listener listener = new Listener() { };
         Subscription subscription = new Subscription(listener, dispatcher);
         plugin.getServer().getPluginManager().registerEvent(eventType, listener, priority, (ignored, event) -> {
+            if (!eventType.isInstance(event)) {
+                return;
+            }
             try {
                 subscription.dispatch(event);
             } catch (InvocationRejectedError rejected) {
