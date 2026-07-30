@@ -192,12 +192,78 @@ class ShamooNodeRuntimeTest {
     }
 
     @Test
-    void adaptsAsynchronousHostResultsToIsolateOwnedPromises() {
+    void adaptsAsynchronousHostResultsToIsolateOwnedPromises() throws Exception {
+        CountDownLatch invoked = new CountDownLatch(1);
+        CompletableFuture<Integer> supplied = new CompletableFuture<>();
         try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(
                 new PluginId("host-promises"), pluginRoot, policy(List.of(), List.of(), List.of()),
-                Map.of("later", arguments -> CompletableFuture.supplyAsync(() -> 42)),
+                Map.of("later", arguments -> {
+                    invoked.countDown();
+                    return supplied;
+                }),
                 ShamooNodeRuntimeOptions.DEFAULT, error -> { })) {
-            assertEquals(43, runtime.evaluate("host.later().then(value => value + 1)", "host-promise.js").join());
+            CompletableFuture<Object> result = runtime.evaluate(
+                "host.later().then(value => value + 1)", "host-promise.js");
+            assertTrue(invoked.await(5, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> result.get(100, TimeUnit.MILLISECONDS));
+
+            supplied.complete(42);
+            assertEquals(43, result.get(500, TimeUnit.MILLISECONDS));
+        }
+    }
+
+    @Test
+    void drivesDetachedPromiseContinuationsWhenHostResultsSettle() {
+        CompletableFuture<Integer> supplied = new CompletableFuture<>();
+        try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(
+                new PluginId("detached-host-promises"), pluginRoot, policy(List.of(), List.of(), List.of()),
+                Map.of("later", arguments -> supplied),
+                ShamooNodeRuntimeOptions.DEFAULT, error -> { })) {
+            assertEquals("started", runtime.evaluate(
+                "globalThis.detachedResult = 0;"
+                    + "host.later().then(value => { globalThis.detachedResult = value });"
+                    + "'started'",
+                "detached-host-promise.js").join());
+
+            supplied.complete(42);
+            assertEquals(42, runtime.evaluate("detachedResult", "detached-result.js").join());
+        }
+    }
+
+    @Test
+    void drivesDetachedHostCompletionsAfterTheInvocationQueueSaturates() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Integer> supplied = new CompletableFuture<>();
+        ShamooNodeRuntimeOptions limits =
+            new ShamooNodeRuntimeOptions(1, Duration.ofSeconds(10), Duration.ofSeconds(5));
+        try (ShamooNodeRuntime runtime = ShamooNodeRuntime.create(
+                new PluginId("saturated-host-promises"), pluginRoot, policy(List.of(), List.of(), List.of()),
+                Map.of(
+                    "later", arguments -> supplied,
+                    "block", arguments -> {
+                        entered.countDown();
+                        assertTrue(release.await(5, TimeUnit.SECONDS));
+                        return "released";
+                    }),
+                limits, error -> { })) {
+            assertEquals("started", runtime.evaluate(
+                "globalThis.saturatedResult = 0;"
+                    + "host.later().then(value => { globalThis.saturatedResult = value });"
+                    + "'started'",
+                "saturated-host-promise.js").join());
+            CompletableFuture<Object> active = runtime.evaluate("host.block()", "block.js");
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            CompletableFuture<Object> queued = runtime.evaluate("'queued'", "queued.js");
+
+            supplied.complete(42);
+            assertTrue(queued.cancel(false));
+            release.countDown();
+
+            assertEquals("released", active.get(5, TimeUnit.SECONDS));
+            assertEquals(42, runtime.evaluate("saturatedResult", "saturated-result.js").join());
+        } finally {
+            release.countDown();
         }
     }
 
