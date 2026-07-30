@@ -60,6 +60,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 
 /** One policy-controlled Javet Node isolate owned by exactly one platform thread. */
 @SuppressWarnings({
@@ -74,6 +75,7 @@ import java.util.concurrent.atomic.AtomicReference;
     "PMD.UnusedLocalVariable"
 })
 public final class ShamooNodeRuntime implements AutoCloseable {
+    private static final long ISOLATE_IDLE_WAIT_NANOS = TimeUnit.MILLISECONDS.toNanos(10);
     private static final String PLUGIN_PREFIX = "plugin:/";
     private static final Set<String> SAFE_BUILTINS = Set.of(
         "node:assert", "node:buffer", "node:path", "node:querystring", "node:string_decoder", "node:url", "node:util");
@@ -723,9 +725,12 @@ public final class ShamooNodeRuntime implements AutoCloseable {
         try {
             while (promise.isPending()) {
                 drainIsolateCompletions();
-                nodeRuntime.await(V8AwaitMode.RunOnce);
+                nodeRuntime.await(V8AwaitMode.RunNoWait);
+                if (promise.isPending() && isolateCompletions.isEmpty()) {
+                    LockSupport.parkNanos(this, ISOLATE_IDLE_WAIT_NANOS);
+                }
             }
-            drainIsolateCompletions();
+            pumpIsolateCompletions();
             try (V8Value promiseResult = promise.getResult()) {
                 if (promise.isRejected()) {
                     throw new RuntimeEvaluationError(
@@ -738,7 +743,7 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             synchronized (completionLock) {
                 awaitingPromises.decrementAndGet();
             }
-            drainIsolateCompletions();
+            pumpIsolateCompletions();
         }
     }
 
@@ -748,11 +753,12 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             isolateCompletions.add(completion);
             wake = awaitingPromises.get() == 0;
         }
+        LockSupport.unpark(ownerThread);
         if (!wake) {
             return CompletableFuture.completedFuture(null);
         }
         return submit(() -> {
-            drainIsolateCompletions();
+            pumpIsolateCompletions();
             return null;
         });
     }
@@ -772,6 +778,14 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             completion.run();
             completion = isolateCompletions.poll();
         }
+    }
+
+    private void pumpIsolateCompletions() {
+        do {
+            drainIsolateCompletions();
+            nodeRuntime.await(V8AwaitMode.RunNoWait);
+        } while (!isolateCompletions.isEmpty());
+        reportPendingPromiseRejections();
     }
 
     private IV8Executor executor(String source, String resourceName, boolean module) {
@@ -1139,8 +1153,17 @@ public final class ShamooNodeRuntime implements AutoCloseable {
             activeInvocations.incrementAndGet();
             try {
                 assertOwnerThread();
+                if (nodeRuntime != null && state.get() == RuntimeState.RUNNING
+                        && !isolateCompletions.isEmpty()) {
+                    pumpIsolateCompletions();
+                }
                 if (!future.isDone()) {
-                    future.complete(callable.call());
+                    T result = callable.call();
+                    if (nodeRuntime != null && state.get() == RuntimeState.RUNNING
+                            && !isolateCompletions.isEmpty()) {
+                        pumpIsolateCompletions();
+                    }
+                    future.complete(result);
                 }
             } catch (Throwable throwable) {
                 future.completeExceptionally(throwable);
