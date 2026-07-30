@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -24,6 +26,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -40,6 +43,11 @@ class PaperJavaBridgeTest {
     private static final String FIXTURE = "dev.shamoo.runtime.platform.paper.PaperJavaBridgeTest$Fixture";
     private static final String FIXTURE_EVENT =
             "dev.shamoo.runtime.platform.paper.PaperJavaBridgeTest$FixtureEvent";
+    private static final String GLOBAL_SCHEDULER =
+            "io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler";
+    private static final String GLOBAL_SCHEDULER_RUN =
+            "(Lorg/bukkit/plugin/Plugin;Ljava/util/function/Consumer;)"
+                    + "Lio/papermc/paper/threadedregions/scheduler/ScheduledTask;";
 
     @Test
     void constructsAndInvokesOnlyCataloguedMembersThroughTheScheduler() throws IOException {
@@ -189,6 +197,56 @@ class PaperJavaBridgeTest {
     }
 
     @Test
+    void forgetsCompletedOneShotSchedulerResources() throws IOException {
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        Server server = mock(Server.class);
+        GlobalRegionScheduler scheduler = mock(GlobalRegionScheduler.class);
+        ScheduledTask task = mock(ScheduledTask.class);
+        AtomicReference<Consumer<ScheduledTask>> execution = new AtomicReference<>();
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.isEnabled()).thenReturn(true);
+        when(server.isGlobalTickThread()).thenReturn(true);
+        when(scheduler.run(eq(plugin), any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Consumer<ScheduledTask> action = invocation.getArgument(1, Consumer.class);
+            execution.set(action);
+            return task;
+        });
+        Fixture.globalSchedulerFixture = scheduler;
+        PaperJavaBridge bridge = new PaperJavaBridge(plugin, new PluginId("fixture"), UUID.randomUUID(),
+                registry(), Duration.ofSeconds(1), 8, 32);
+        Map<?, ?> fixture = stage(bridge.invoke(List.of(Map.of(
+                "operation", "construct",
+                "type", FIXTURE,
+                "descriptor", "()V",
+                "arguments", List.of()))));
+        Map<?, ?> schedulerHandle = stage(bridge.invoke(List.of(Map.of(
+                "operation", "invoke",
+                "type", FIXTURE,
+                "name", "scheduler",
+                "descriptor", "()Lio/papermc/paper/threadedregions/scheduler/GlobalRegionScheduler;",
+                "target", fixture,
+                "arguments", List.of()))));
+        CountingCallback callback = new CountingCallback();
+
+        Map<?, ?> taskHandle = stage(bridge.invoke(List.of(Map.of(
+                "operation", "invoke",
+                "type", GLOBAL_SCHEDULER,
+                "name", "run",
+                "descriptor", GLOBAL_SCHEDULER_RUN,
+                "target", schedulerHandle,
+                "arguments", List.of(Map.of("$paper", "plugin"), callback)))));
+
+        assertEquals(true, bridge.invoke(List.of(Map.of(
+                "operation", "release",
+                "handle", taskHandle.get("$paperHandle")))));
+        execution.get().accept(task);
+        assertEquals(1, callback.closed.get());
+        bridge.close();
+        verify(task, never()).cancel();
+    }
+
+    @Test
     void rejectsHandlesReturnedAfterTheirFrameExpires() throws Exception {
         JavaPlugin plugin = mock(JavaPlugin.class);
         PaperJavaBridge bridge = new PaperJavaBridge(plugin, new PluginId("fixture"), UUID.randomUUID(),
@@ -242,11 +300,15 @@ class PaperJavaBridgeTest {
                        "id": "%s#echo(J)J",
                        "name": "echo",
                        "descriptor": "(J)J"
-                     }, {
-                       "id": "%s#invokeBoolean(Ljava/util/function/BooleanSupplier;)Z",
-                       "name": "invokeBoolean",
-                       "descriptor": "(Ljava/util/function/BooleanSupplier;)Z"
-                      }]
+                      }, {
+                        "id": "%s#invokeBoolean(Ljava/util/function/BooleanSupplier;)Z",
+                        "name": "invokeBoolean",
+                        "descriptor": "(Ljava/util/function/BooleanSupplier;)Z"
+                      }, {
+                        "id": "%s#scheduler()L%s;",
+                        "name": "scheduler",
+                        "descriptor": "()L%s;"
+                       }]
                     }, {
                       "javaName": "%s",
                       "methods": [{
@@ -258,15 +320,26 @@ class PaperJavaBridgeTest {
                         "name": "delayedFixture",
                         "descriptor": "()Ljava/util/concurrent/CompletionStage;"
                       }]
+                    }, {
+                      "javaName": "%s",
+                      "methods": [{
+                        "id": "%s#run%s",
+                        "name": "run",
+                        "descriptor": "%s"
+                      }]
                     }]
                   }
-                """.formatted(FIXTURE, FIXTURE, FIXTURE, FIXTURE, FIXTURE,
+                """.formatted(FIXTURE, FIXTURE, FIXTURE, FIXTURE, FIXTURE, FIXTURE,
+                        GLOBAL_SCHEDULER.replace('.', '/'), GLOBAL_SCHEDULER.replace('.', '/'),
                         FIXTURE_EVENT, FIXTURE_EVENT, FIXTURE.replace('.', '/'), FIXTURE.replace('.', '/'),
-                        FIXTURE_EVENT));
+                        FIXTURE_EVENT, GLOBAL_SCHEDULER, GLOBAL_SCHEDULER, GLOBAL_SCHEDULER_RUN,
+                        GLOBAL_SCHEDULER_RUN));
         return GeneratedPaperApiRegistry.parse(getClass().getClassLoader(), model);
     }
 
     public static final class Fixture {
+        private static GlobalRegionScheduler globalSchedulerFixture;
+
         public int length() {
             return 0;
         }
@@ -277,6 +350,24 @@ class PaperJavaBridgeTest {
 
         public boolean invokeBoolean(BooleanSupplier callback) {
             return callback.getAsBoolean();
+        }
+
+        public GlobalRegionScheduler scheduler() {
+            return globalSchedulerFixture;
+        }
+    }
+
+    private static final class CountingCallback implements ScriptCallback {
+        private final AtomicInteger closed = new AtomicInteger();
+
+        @Override
+        public CompletionStage<Object> invoke(List<Object> arguments) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void close() {
+            closed.incrementAndGet();
         }
     }
 

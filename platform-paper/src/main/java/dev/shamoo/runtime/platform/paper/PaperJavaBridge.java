@@ -690,7 +690,13 @@ public final class PaperJavaBridge implements AutoCloseable {
             }
             CompletionStage<Object> result = callback.invoke(List.of(Map.of(
                     "$paperCallback", true, "arguments", encoded)));
-            return closeAfterInvocation ? result.whenComplete((ignored, failure) -> callback.close()) : result;
+            return closeAfterInvocation ? result.whenComplete((ignored, failure) -> {
+                try {
+                    callback.close();
+                } finally {
+                    forgetCallbackResources(arguments);
+                }
+            }) : result;
         }
         PaperInvocationFrame frame = createFrame();
         try {
@@ -704,7 +710,22 @@ public final class PaperJavaBridge implements AutoCloseable {
         } finally {
             expire(frame);
             if (closeAfterInvocation) {
-                callback.close();
+                try {
+                    callback.close();
+                } finally {
+                    forgetCallbackResources(arguments);
+                }
+            }
+        }
+    }
+
+    private void forgetCallbackResources(Object[] arguments) {
+        synchronized (lifecycleLock) {
+            for (Object argument : arguments) {
+                if (argument instanceof BukkitTask
+                        || argument instanceof io.papermc.paper.threadedregions.scheduler.ScheduledTask) {
+                    nativeResources.remove(argument);
+                }
             }
         }
     }
