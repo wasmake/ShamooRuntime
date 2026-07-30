@@ -28,7 +28,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 /** Aggregates strict script routes behind owned Paper command registrations. */
 @SuppressWarnings({"PMD.CloseResource", "PMD.AvoidFieldNameMatchingMethodName", "PMD.CompareObjectsWithEquals",
         "PMD.LooseCoupling"})
-public final class PaperCommandBridge {
+public final class PaperCommandBridge implements AutoCloseable {
     private final JavaPlugin plugin;
     private final PaperCommandContextBridge contexts;
     private final Capability selectedCapability;
@@ -36,6 +36,7 @@ public final class PaperCommandBridge {
     private final List<NativeRegistration> nativeRegistrations = new CopyOnWriteArrayList<>();
     private final AtomicReference<Commands> lifecycleRegistrar = new AtomicReference<>();
     private final AtomicLong routeSequence = new AtomicLong();
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     public PaperCommandBridge(JavaPlugin plugin, PaperCommandContextBridge contexts) {
         this(plugin, contexts, selectCapability(true));
@@ -102,7 +103,8 @@ public final class PaperCommandBridge {
     }
 
     static void removeKnownCommands(Map<String, Command> commands, Command command) {
-        commands.entrySet().removeIf(entry -> entry.getValue().equals(command));
+        commands.entrySet().stream().filter(entry -> entry.getValue().equals(command))
+                .map(Map.Entry::getKey).toList().forEach(key -> commands.remove(key, command));
     }
 
     int aggregateCount() {
@@ -131,6 +133,34 @@ public final class PaperCommandBridge {
             if (aggregate.empty() && aggregates.get(aggregate.key()) == aggregate) {
                 aggregate.closeNative();
                 aggregates.remove(aggregate.key(), aggregate);
+            }
+        }
+    }
+
+    private void closeRouteAfterPlatformDisable(Aggregate aggregate, RouteTarget target) {
+        synchronized (aggregates) {
+            aggregate.remove(target);
+            target.close();
+            if (aggregate.empty()) {
+                aggregates.remove(aggregate.key(), aggregate);
+            }
+        }
+    }
+
+    @Override
+    public void close() {
+        if (closed.compareAndSet(false, true)) {
+            try {
+                contexts.runGlobalAndWait(() -> {
+                    synchronized (aggregates) {
+                        nativeRegistrations.forEach(NativeRegistration::close);
+                        nativeRegistrations.clear();
+                        aggregates.clear();
+                    }
+                });
+            } catch (RuntimeException | Error failure) {
+                closed.set(false);
+                throw failure;
             }
         }
     }
@@ -170,7 +200,11 @@ public final class PaperCommandBridge {
         public void close() {
             if (closed.compareAndSet(false, true)) {
                 try {
-                    bridge.contexts.runGlobalAndWait(() -> bridge.closeRoute(aggregate, target));
+                    if (bridge.closed.get()) {
+                        bridge.closeRouteAfterPlatformDisable(aggregate, target);
+                    } else {
+                        bridge.contexts.runGlobalAndWait(() -> bridge.closeRoute(aggregate, target));
+                    }
                 } catch (RuntimeException | Error failure) {
                     closed.set(false);
                     throw failure;

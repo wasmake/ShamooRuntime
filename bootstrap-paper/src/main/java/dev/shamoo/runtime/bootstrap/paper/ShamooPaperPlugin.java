@@ -301,6 +301,13 @@ public final class ShamooPaperPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (commandBridge != null) {
+            try {
+                commandBridge.close();
+            } catch (RuntimeException exception) {
+                getLogger().log(Level.WARNING, "Unable to close script command registrations", exception);
+            }
+        }
         if (pluginHost != null) {
             try {
                 pluginHost.close();

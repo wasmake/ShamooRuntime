@@ -9,8 +9,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.shamoo.runtime.core.CompiledBindingMetadata;
@@ -19,9 +21,11 @@ import dev.shamoo.runtime.core.ScriptCallback;
 import dev.shamoo.runtime.protocol.ProtocolVersion;
 import io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -150,6 +154,28 @@ class PaperCommandBridgeTest {
     }
 
     @Test
+    void closeRemovesCommandsWhenPaperEntryIteratorDoesNotSupportRemoval() {
+        Map<String, Command> known = new HashMap<>() {
+            @Override
+            public Set<Entry<String, Command>> entrySet() {
+                return Collections.unmodifiableSet(super.entrySet());
+            }
+        };
+        Command command = new Command("primary") {
+            @Override
+            public boolean execute(CommandSender sender, String label, String[] arguments) {
+                return true;
+            }
+        };
+        known.put("primary", command);
+        known.put("plugin:primary", command);
+
+        PaperCommandBridge.removeKnownCommands(known, command);
+
+        assertFalse(known.containsValue(command));
+    }
+
+    @Test
     void dispatchDoesNotWaitForNodeCompletionAndCloseReleasesCallback() throws Exception {
         JavaPlugin plugin = mock(JavaPlugin.class);
         Server server = mock(Server.class);
@@ -238,6 +264,57 @@ class PaperCommandBridgeTest {
         cleanup.accept(task);
         close.get(1, TimeUnit.SECONDS);
         assertFalse(known.containsKey("routed"));
+    }
+
+    @Test
+    void platformShutdownPreclosesNativeCommandsWithoutReschedulingRouteCleanup() {
+        JavaPlugin plugin = mock(JavaPlugin.class);
+        Server server = mock(Server.class);
+        CommandMap map = mock(CommandMap.class);
+        GlobalRegionScheduler scheduler = mock(GlobalRegionScheduler.class);
+        ScheduledTask task = mock(ScheduledTask.class);
+        Map<String, Command> known = new HashMap<>();
+        AtomicBoolean callbackClosed = new AtomicBoolean();
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.getName()).thenReturn("runtime");
+        when(plugin.isEnabled()).thenReturn(false);
+        when(plugin.getLogger()).thenReturn(java.util.logging.Logger.getLogger("command-shutdown-test"));
+        when(server.getCommandMap()).thenReturn(map);
+        when(server.getGlobalRegionScheduler()).thenReturn(scheduler);
+        when(map.getKnownCommands()).thenReturn(known);
+        when(map.register(anyString(), any(Command.class))).thenAnswer(invocation -> {
+            known.put("shutdown", invocation.getArgument(1));
+            return true;
+        });
+        when(scheduler.run(eq(plugin), any())).thenAnswer(invocation -> {
+            invocation.<Consumer<ScheduledTask>>getArgument(1).accept(task);
+            return task;
+        });
+        PaperCommandBridge bridge = new PaperCommandBridge(plugin,
+                new PaperCommandContextBridge(plugin, () -> true, entity -> true),
+                PaperCommandBridge.Capability.COMMAND_MAP_FALLBACK);
+        ScriptCallback callback = new ScriptCallback() {
+            @Override
+            public java.util.concurrent.CompletionStage<Object> invoke(List<Object> arguments) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public void close() {
+                callbackClosed.set(true);
+            }
+        };
+        PaperCommandBridge.RouteRegistration registration = bridge.register(new PluginId("fixture"),
+                binding("shutdown"), "shutdown", List.of(), route("", List.of()), callback)
+                .toCompletableFuture().join();
+
+        bridge.close();
+        clearInvocations(scheduler);
+        registration.close();
+
+        verifyNoInteractions(scheduler);
+        assertFalse(known.containsKey("shutdown"));
+        assertTrue(callbackClosed.get());
     }
 
     private static CompiledBindingMetadata binding(String method) {

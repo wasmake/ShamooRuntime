@@ -1,5 +1,6 @@
 package dev.shamoo.runtime.platform.paper;
 
+import dev.shamoo.runtime.core.InvocationRejectedError;
 import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.core.ScriptCallback;
 import java.lang.reflect.Array;
@@ -118,7 +119,8 @@ public final class PaperJavaBridge implements AutoCloseable {
             case "release" -> release(request);
             case "describe" -> Map.of("owner", owner.value(), "generation", generation.toString(),
                     "members", registry.memberCount(), "handles", handles.size(),
-                    "replacementPresent", replacementPresent.getAsBoolean());
+                    "replacementPresent", replacementPresent.getAsBoolean(),
+                    "platformEnabled", plugin.isEnabled());
             default -> throw new IllegalArgumentException("unknown paperJava operation: " + operation);
         };
     }
@@ -653,9 +655,24 @@ public final class PaperJavaBridge implements AutoCloseable {
             if (!method.equals(functional)) {
                 throw new IllegalStateException("unexpected functional interface method: " + method);
             }
-            return invokeCallback(callback, method.getReturnType(), arguments == null ? new Object[0] : arguments,
-                    closeAfterInvocation);
+            try {
+                return invokeCallback(callback, method.getReturnType(),
+                        arguments == null ? new Object[0] : arguments, closeAfterInvocation);
+            } catch (InvocationRejectedError rejected) {
+                // Callbacks can be registered before enable completes and remain registered during drain.
+                return defaultCallbackResult(method.getReturnType());
+            }
                 });
+    }
+
+    private static Object defaultCallbackResult(Class<?> returnType) {
+        if (CompletionStage.class.isAssignableFrom(returnType)) {
+            return CompletableFuture.completedFuture(null);
+        }
+        if (!returnType.isPrimitive() || returnType.equals(void.class)) {
+            return null;
+        }
+        return Array.get(Array.newInstance(returnType, 1), 0);
     }
 
     private Object invokeCallback(ScriptCallback callback, Class<?> returnType, Object[] arguments,

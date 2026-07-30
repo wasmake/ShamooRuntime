@@ -2,6 +2,7 @@ package dev.shamoo.runtime.platform.paper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -9,7 +10,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.shamoo.runtime.core.InvocationRejectedError;
 import dev.shamoo.runtime.core.PluginId;
+import dev.shamoo.runtime.core.ScriptCallback;
 import io.papermc.paper.threadedregions.scheduler.GlobalRegionScheduler;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import java.io.IOException;
@@ -17,7 +20,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import org.bukkit.Server;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -36,6 +41,7 @@ class PaperJavaBridgeTest {
         GlobalRegionScheduler scheduler = mock(GlobalRegionScheduler.class);
         ScheduledTask task = mock(ScheduledTask.class);
         when(plugin.getServer()).thenReturn(server);
+        when(plugin.isEnabled()).thenReturn(true);
         when(server.getGlobalRegionScheduler()).thenReturn(scheduler);
         when(scheduler.run(eq(plugin), any())).thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")
@@ -49,6 +55,7 @@ class PaperJavaBridgeTest {
         Map<?, ?> description = assertInstanceOf(Map.class,
                 bridge.invoke(List.of(Map.of("operation", "describe"))));
         assertEquals(true, description.get("replacementPresent"));
+        assertEquals(true, description.get("platformEnabled"));
 
         Object constructed = bridge.invoke(List.of(Map.of(
                 "operation", "construct",
@@ -75,6 +82,31 @@ class PaperJavaBridgeTest {
                 "arguments", List.of(Map.of("$paperLong", Long.toString(Long.MIN_VALUE))))));
         assertEquals(Map.of("$paperLong", Long.toString(Long.MIN_VALUE)),
                 assertInstanceOf(CompletionStage.class, longValue).toCompletableFuture().join());
+        ScriptCallback rejected = arguments -> {
+            throw new InvocationRejectedError(new PluginId("fixture"));
+        };
+        Object dropped = bridge.invoke(List.of(Map.of(
+                "operation", "invoke",
+                "type", FIXTURE,
+                "name", "invokeBoolean",
+                "descriptor", "(Ljava/util/function/BooleanSupplier;)Z",
+                "target", handle,
+                "arguments", List.of(rejected))));
+        assertEquals(false, assertInstanceOf(CompletionStage.class, dropped).toCompletableFuture().join());
+        IllegalStateException callbackFailure = new IllegalStateException("failed");
+        ScriptCallback failing = arguments -> {
+            throw callbackFailure;
+        };
+        Object failed = bridge.invoke(List.of(Map.of(
+                "operation", "invoke",
+                "type", FIXTURE,
+                "name", "invokeBoolean",
+                "descriptor", "(Ljava/util/function/BooleanSupplier;)Z",
+                "target", handle,
+                "arguments", List.of(failing))));
+        CompletionException exposed = assertThrows(CompletionException.class,
+                () -> assertInstanceOf(CompletionStage.class, failed).toCompletableFuture().join());
+        assertSame(callbackFailure, exposed.getCause());
         assertThrows(IllegalArgumentException.class, () -> bridge.invoke(List.of(Map.of(
                 "operation", "invoke",
                 "type", FIXTURE,
@@ -96,14 +128,18 @@ class PaperJavaBridgeTest {
                       "id": "%s#length()I",
                       "name": "length",
                       "descriptor": "()I"
-                    }, {
-                      "id": "%s#echo(J)J",
-                      "name": "echo",
-                      "descriptor": "(J)J"
-                    }]
-                  }]
-                }
-                """.formatted(FIXTURE, FIXTURE, FIXTURE, FIXTURE));
+                     }, {
+                       "id": "%s#echo(J)J",
+                       "name": "echo",
+                       "descriptor": "(J)J"
+                     }, {
+                       "id": "%s#invokeBoolean(Ljava/util/function/BooleanSupplier;)Z",
+                       "name": "invokeBoolean",
+                       "descriptor": "(Ljava/util/function/BooleanSupplier;)Z"
+                     }]
+                   }]
+                 }
+                """.formatted(FIXTURE, FIXTURE, FIXTURE, FIXTURE, FIXTURE));
         return GeneratedPaperApiRegistry.parse(getClass().getClassLoader(), model);
     }
 
@@ -114,6 +150,10 @@ class PaperJavaBridgeTest {
 
         public long echo(long value) {
             return value;
+        }
+
+        public boolean invokeBoolean(BooleanSupplier callback) {
+            return callback.getAsBoolean();
         }
     }
 }
