@@ -140,29 +140,42 @@ public final class PluginDiscovery implements PluginStager {
 
     private static Map<String, FileSnapshot> inventory(Path root) throws IOException {
         Map<String, FileSnapshot> inventory = new java.util.TreeMap<>();
-        for (Path path : list(root)) {
-            if (Files.isSymbolicLink(path)) {
-                throw discovery("symbolic_link_rejected", path, "symbolic links are not allowed", null);
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted().toList()) {
+                if (path.equals(root)) {
+                    continue;
+                }
+                if (Files.isSymbolicLink(path)) {
+                    throw discovery("symbolic_link_rejected", path, "symbolic links are not allowed", null);
+                }
+                BasicFileAttributes attributes = Files.readAttributes(
+                        path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                if (attributes.isRegularFile()) {
+                    String relative = root.relativize(path).toString()
+                            .replace(path.getFileSystem().getSeparator(), "/");
+                    byte[] content = Files.readAllBytes(path);
+                    inventory.put(relative, new FileSnapshot(
+                            new FileStamp(attributes.size(), attributes.lastModifiedTime().toMillis(),
+                                    checksum(content)), content));
+                } else if (!attributes.isDirectory()) {
+                    throw discovery("unsupported_file_type", path,
+                            "plugin contains an unsupported file type", null);
+                }
             }
-            BasicFileAttributes attributes = Files.readAttributes(
-                    path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            if (!attributes.isRegularFile()) {
-                throw discovery("invalid_candidate_layout", path,
-                        "plugin candidates may contain only the three protocol files", null);
-            }
-            String name = Objects.requireNonNull(path.getFileName(), "candidate file name").toString();
-            byte[] content = Files.readAllBytes(path);
-            inventory.put(name, new FileSnapshot(
-                    new FileStamp(attributes.size(), attributes.lastModifiedTime().toMillis(), checksum(content)),
-                    content));
         }
-        if (!inventory.keySet().equals(PluginArtifactProtocol.REQUIRED_FILES)) {
+        Set<String> rootFiles = new java.util.TreeSet<>();
+        for (String path : inventory.keySet()) {
+            if (!path.contains("/")) {
+                rootFiles.add(path);
+            }
+        }
+        if (!rootFiles.equals(PluginArtifactProtocol.REQUIRED_FILES)) {
             Set<String> missing = new java.util.TreeSet<>(PluginArtifactProtocol.REQUIRED_FILES);
-            missing.removeAll(inventory.keySet());
-            Set<String> extra = new java.util.TreeSet<>(inventory.keySet());
+            missing.removeAll(rootFiles);
+            Set<String> extra = new java.util.TreeSet<>(rootFiles);
             extra.removeAll(PluginArtifactProtocol.REQUIRED_FILES);
             throw discovery("invalid_candidate_layout", root,
-                    "plugin candidate must contain exactly " + PluginArtifactProtocol.REQUIRED_FILES
+                    "plugin candidate root must contain exactly " + PluginArtifactProtocol.REQUIRED_FILES
                             + "; missing=" + missing + ", extra=" + extra,
                     null);
         }
