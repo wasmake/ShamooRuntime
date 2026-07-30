@@ -1,5 +1,6 @@
 package dev.shamoo.runtime.platform.paper;
 
+import dev.shamoo.runtime.core.InvocationRejectedError;
 import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.core.ResourceCategory;
 import dev.shamoo.runtime.core.ResourceRegistry;
@@ -32,6 +33,9 @@ public final class PaperEventBridge {
         plugin.getServer().getPluginManager().registerEvent(eventType, listener, priority, (ignored, event) -> {
             try {
                 subscription.dispatch(event);
+            } catch (InvocationRejectedError rejected) {
+                // Subscriptions exist before enable and during drain; events in those windows are dropped.
+                return;
             } catch (Exception exception) {
                 throw new EventException(exception);
             }
