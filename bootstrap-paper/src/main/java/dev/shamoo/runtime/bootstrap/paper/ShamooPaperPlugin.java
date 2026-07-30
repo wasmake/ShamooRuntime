@@ -1,11 +1,16 @@
 package dev.shamoo.runtime.bootstrap.paper;
 
 import dev.shamoo.runtime.core.PluginId;
+import dev.shamoo.runtime.core.PlatformInvocationScope;
+import dev.shamoo.runtime.core.PluginRuntimeContext;
 import dev.shamoo.runtime.core.ResourceRegistry;
+import dev.shamoo.runtime.core.ResourceCategory;
 import dev.shamoo.runtime.core.PlatformCapabilities;
 import dev.shamoo.runtime.core.OptionalProxyTransport;
 import dev.shamoo.runtime.core.ScriptCallback;
 import dev.shamoo.runtime.javet.JavetPluginHost;
+import dev.shamoo.runtime.javet.HostFunction;
+import dev.shamoo.runtime.javet.PluginTextFileStore;
 import dev.shamoo.runtime.protocol.CompatibilityInput;
 import dev.shamoo.runtime.protocol.PlatformKind;
 import dev.shamoo.runtime.protocol.ProtocolVersion;
@@ -14,11 +19,13 @@ import dev.shamoo.runtime.protocol.SemanticVersion;
 import dev.shamoo.runtime.protocol.Version;
 import dev.shamoo.runtime.protocol.VersionParser;
 import dev.shamoo.runtime.platform.paper.GeneratedPaperEventRegistry;
+import dev.shamoo.runtime.platform.paper.GeneratedPaperApiRegistry;
 import dev.shamoo.runtime.platform.paper.PaperCommandContextBridge;
 import dev.shamoo.runtime.platform.paper.PaperEventBridge;
 import dev.shamoo.runtime.platform.paper.PaperCommandBridge;
 import dev.shamoo.runtime.platform.paper.PaperSchedulerBridge;
 import dev.shamoo.runtime.platform.paper.PaperMessagingBridge;
+import dev.shamoo.runtime.platform.paper.PaperJavaBridge;
 import dev.shamoo.runtime.platform.paper.PaperUiBridge;
 import dev.shamoo.runtime.platform.paper.nms.GeneratedPacketRegistry;
 import dev.shamoo.runtime.platform.paper.nms.PaperNmsInjectionManager;
@@ -32,6 +39,8 @@ import java.util.Map;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -45,6 +54,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     private final ResourceRegistry packetResources = new ResourceRegistry();
     private final ResourceRegistry platformResources = new ResourceRegistry();
     private GeneratedPaperEventRegistry eventRegistry;
+    private GeneratedPaperApiRegistry paperApiRegistry;
     private PaperEventBridge eventBridge;
     private PaperCommandBridge commandBridge;
     private PaperCommandContextBridge commandContextBridge;
@@ -54,11 +64,13 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     private OptionalProxyTransport proxyTransport;
     private PacketDispatcherHub packetDispatcher;
     private PaperNmsInjectionManager packetManager;
+    private final Map<PluginId, List<PaperJavaBridge>> paperApiSessions = new ConcurrentHashMap<>();
 
     @Override
     public void onEnable() {
         try {
             eventRegistry = GeneratedPaperEventRegistry.load(getClassLoader());
+            paperApiRegistry = GeneratedPaperApiRegistry.load(getClassLoader());
             eventBridge = new PaperEventBridge(this, platformResources);
             commandContextBridge = new PaperCommandContextBridge(this);
             commandBridge = new PaperCommandBridge(this, commandContextBridge);
@@ -72,7 +84,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
             pluginHost = new JavetPluginHost(pluginDirectory(), compatibility(), platformCapabilities(),
                     Duration.ofMillis(getConfig().getLong("plugins.stability-millis", 200)),
                     Duration.ofMillis(getConfig().getLong("plugins.drain-timeout-millis", 5000)),
-                    context -> Map.of(), System.getLogger(getClass().getName()));
+                    this::customBindings, System.getLogger(getClass().getName()));
             PaperRuntimeCommands.register(this, pluginHost::pluginStatuses);
             pluginHost.startAsync(Duration.ofMillis(getConfig().getLong("plugins.watch-debounce-millis", 500)))
                     .whenComplete((ignored, failure) -> startupCompleted(failure));
@@ -86,7 +98,8 @@ public final class ShamooPaperPlugin extends JavaPlugin {
             if (getLogger().isLoggable(Level.INFO)) {
                 getLogger().info("ShamooRuntime initialized with protocol " + ProtocolVersion.CURRENT
                         + " and " + pluginHost.runtimeCount() + " isolated plugins"
-                        + " and " + eventRegistry.size() + " generated Paper events");
+                        + ", " + eventRegistry.size() + " generated Paper events, and "
+                        + paperApiRegistry.memberCount() + " executable public Paper members");
             }
             return;
         }
@@ -99,7 +112,7 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     }
 
     private void startupFailed(Throwable failure) {
-        getLogger().log(Level.SEVERE, "Unable to initialize the V8 runtime", failure);
+        getLogger().log(Level.SEVERE, "Unable to initialize ShamooRuntime", failure);
         getServer().getPluginManager().disablePlugin(this);
     }
 
@@ -107,6 +120,54 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         String configured = getConfig().getString("plugins.directory", "plugins");
         java.nio.file.Path path = java.nio.file.Path.of(configured);
         return path.isAbsolute() ? path : getDataFolder().toPath().resolve(path);
+    }
+
+    private Map<String, HostFunction> customBindings(PluginRuntimeContext context) {
+        PluginId owner = context.candidate().pluginId();
+        List<PaperJavaBridge> sessions = paperApiSessions.computeIfAbsent(
+                owner, ignored -> new CopyOnWriteArrayList<>());
+        PaperJavaBridge paper = new PaperJavaBridge(this, owner, context.generationId(), paperApiRegistry,
+                Duration.ofMillis(getConfig().getLong("paper-api.synchronous-timeout-millis", 100)),
+                getConfig().getInt("paper-api.maximum-pending-frame-calls", 256),
+                getConfig().getInt("paper-api.maximum-handles", 65_536),
+                () -> sessions.stream().anyMatch(session -> session.open()
+                        && !session.generation().equals(context.generationId())));
+        sessions.add(paper);
+        context.resources().register(owner, ResourceCategory.GENERIC,
+                "generated Paper API generation " + context.generationId(), () -> {
+                    paper.close();
+                    sessions.remove(paper);
+                    if (sessions.isEmpty()) {
+                        paperApiSessions.remove(owner, sessions);
+                    }
+                });
+        try {
+            PluginTextFileStore files = new PluginTextFileStore(
+                    getDataFolder().toPath().resolve("plugin-data").resolve(owner.value()),
+                    context.candidate().root(),
+                    context.candidate().descriptor().node().filesystem().read(),
+                    context.candidate().descriptor().node().filesystem().write());
+            return Map.of(
+                    "paperJava", paper::invoke,
+                    "shamooReadTextFile", arguments -> files.read(string(arguments, 0)),
+                    "shamooWriteTextFile", arguments -> {
+                        files.write(string(arguments, 0), string(arguments, 1));
+                        return null;
+                    });
+        } catch (IOException exception) {
+            throw new IllegalStateException("unable to initialize plugin text storage for " + owner, exception);
+        }
+    }
+
+    private PaperJavaBridge currentPaperApi(PluginId owner) {
+        List<PaperJavaBridge> sessions = paperApiSessions.getOrDefault(owner, List.of());
+        java.util.Optional<java.util.UUID> generation = PlatformInvocationScope.generation();
+        for (PaperJavaBridge session : sessions.reversed()) {
+            if (session.open() && (generation.isEmpty() || generation.get().equals(session.generation()))) {
+                return session;
+            }
+        }
+        throw new IllegalStateException("generated Paper API session is unavailable for " + owner);
     }
 
     private CompatibilityInput compatibility() {
@@ -137,11 +198,10 @@ public final class ShamooPaperPlugin extends JavaPlugin {
     private PlatformCapabilities platformCapabilities() {
         return new PlatformCapabilities("paper", Map.ofEntries(
                 Map.entry("paperSubscribeEvent", (owner, metadata, arguments) -> {
+                    PaperJavaBridge paper = currentPaperApi(owner);
                     return eventBridge.subscribe(owner, eventRegistry, string(arguments, 0),
                             EventPriority.valueOf(string(arguments, 1)), bool(arguments, 2),
-                            event -> typed(arguments, 3, ScriptCallback.class).invoke(List.of(Map.of(
-                                    "type", event.getEventName(), "asynchronous", event.isAsynchronous())))
-                                    .toCompletableFuture().join());
+                            event -> paper.dispatchEvent(event, typed(arguments, 3, ScriptCallback.class)));
                 }),
                 Map.entry("paperRegisterCommand", (owner, metadata, arguments) -> {
                     return commandBridge.register(owner, metadata, string(arguments, 0), strings(arguments, 1),
@@ -257,6 +317,14 @@ public final class ShamooPaperPlugin extends JavaPlugin {
         if (commandContextBridge != null) {
             commandContextBridge.close();
         }
+        paperApiSessions.values().stream().flatMap(java.util.Collection::stream).forEach(session -> {
+            try {
+                session.close();
+            } catch (RuntimeException exception) {
+                getLogger().log(Level.WARNING, "Unable to close a generated Paper API session", exception);
+            }
+        });
+        paperApiSessions.clear();
         try {
             platformResources.closeAll();
             packetResources.closeAll();

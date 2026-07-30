@@ -5,15 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.javet.HostedPluginStatus;
 import java.lang.reflect.Method;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 @SuppressWarnings({"PMD.AvoidAccessibilityAlteration", "PMD.UnitTestContainsTooManyAsserts",
         "PMD.UnitTestAssertionsShouldIncludeMessage"})
 class ShamooPaperPluginTest {
+    @TempDir
+    Path temporary;
+
     @Test
     void normalizesBukkitBuildSuffixes() throws ReflectiveOperationException {
         Map<String, String> versions = Map.of(

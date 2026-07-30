@@ -10,3 +10,8 @@ packets:
   allowed-plugins: []
   timeout-millis: 50
   maximum-pending: 256
+
+paper-api:
+  synchronous-timeout-millis: 100
+  maximum-pending-frame-calls: 256
+  maximum-handles: 65536

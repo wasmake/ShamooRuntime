@@ -9,6 +9,7 @@ import dev.shamoo.runtime.core.PluginRuntimeFactory;
 import dev.shamoo.runtime.core.PlatformOperationResult;
 import dev.shamoo.runtime.core.InvocationAdmission;
 import dev.shamoo.runtime.core.InvocationController;
+import dev.shamoo.runtime.core.InvocationRejectedError;
 import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.core.ResourceCategory;
 import dev.shamoo.runtime.core.ResourceRegistry;
@@ -74,8 +75,11 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
         Objects.requireNonNull(context, "context");
         try {
             ShamooPluginMetadata metadata = ShamooPluginMetadata.from(context.candidate().descriptor(), platform);
-            Map<String, HostFunction> hostBindings = new LinkedHashMap<>(bindings.apply(context));
             AtomicReference<ShamooNodeRuntime> runtimeReference = new AtomicReference<>();
+            Map<String, HostFunction> hostBindings = new LinkedHashMap<>(bindings.apply(context));
+            hostBindings.replaceAll((name, binding) -> managedHostBinding(
+                    binding, context.resources(), context.candidate().pluginId(), name, context.invocations(),
+                    runtimeReference));
             Map<String, PluginServiceProxy> serviceProxies = new java.util.concurrent.ConcurrentHashMap<>();
             addCoreBindings(context, metadata, hostBindings, runtimeReference, serviceProxies);
             context.platformCapabilities().operations().forEach((name, operation) -> {
@@ -93,8 +97,11 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
                     try {
                         adapted = adaptCallbacks(arguments.subList(1, arguments.size()),
                                 runtimeReference, context.invocations());
-                        Object result = context.platformCapabilities().invoke(name, context.candidate().pluginId(),
-                                parsedBinding, adapted.values());
+                        AdaptedArguments invocationArguments = adapted;
+                        Object result = dev.shamoo.runtime.core.PlatformInvocationScope.invoke(
+                                context.generationId(), () -> context.platformCapabilities().invoke(
+                                        name, context.candidate().pluginId(), parsedBinding,
+                                        invocationArguments.values()));
                         Object normalized = normalizePlatformResult(result, context.resources(),
                                 context.candidate().pluginId(), name, adapted.ownership(), 0);
                         return keepAdmissionUntilSettled(normalized, lease);
@@ -260,6 +267,45 @@ public final class JavetPluginRuntimeFactory implements PluginRuntimeFactory {
 
     static Object normalizePlatformResult(Object result, ResourceRegistry resources, PluginId owner, String name) {
         return normalizePlatformResult(result, resources, owner, name, new CallbackOwnership(), 0);
+    }
+
+    static HostFunction managedHostBinding(HostFunction binding, ResourceRegistry resources, PluginId owner,
+            String name, InvocationController invocations) {
+        return managedHostBinding(binding, resources, owner, name, invocations, null);
+    }
+
+    private static HostFunction managedHostBinding(HostFunction binding, ResourceRegistry resources, PluginId owner,
+            String name, InvocationController invocations, AtomicReference<ShamooNodeRuntime> runtime) {
+        Objects.requireNonNull(binding, "binding");
+        Objects.requireNonNull(invocations, "invocations");
+        return arguments -> {
+            InvocationAdmission.Lease lease = null;
+            AdaptedArguments adapted = null;
+            if (invocations.snapshot().accepting()) {
+                try {
+                    lease = invocations.admit();
+                } catch (InvocationRejectedError failure) {
+                    return CompletableFuture.failedFuture(failure);
+                }
+            }
+            try {
+                adapted = runtime == null
+                        ? new AdaptedArguments(arguments, new CallbackOwnership())
+                        : adaptCallbacks(arguments, runtime, invocations);
+                Object normalized = normalizePlatformResult(
+                        binding.invoke(adapted.values(), lease != null), resources, owner, name,
+                        adapted.ownership(), 0);
+                return keepAdmissionUntilSettled(normalized, lease);
+            } catch (Exception | Error failure) {
+                if (adapted != null) {
+                    adapted.ownership().close();
+                }
+                if (lease != null) {
+                    lease.close();
+                }
+                throw failure;
+            }
+        };
     }
 
     static Object normalizePlatformResult(Object result, ResourceRegistry resources, PluginId owner, String name,

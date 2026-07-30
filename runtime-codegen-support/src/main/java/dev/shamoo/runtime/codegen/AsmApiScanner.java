@@ -165,7 +165,7 @@ public final class AsmApiScanner {
         @Override
         public FieldVisitor visitField(int fieldAccess, String fieldName, String descriptor, String fieldSignature,
                 Object value) {
-            if ((fieldAccess & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) == 0
+            if ((fieldAccess & Opcodes.ACC_PUBLIC) == 0
                     || (fieldAccess & Opcodes.ACC_SYNTHETIC) != 0) {
                 return null;
             }
@@ -178,7 +178,7 @@ public final class AsmApiScanner {
         @Override
         public MethodVisitor visitMethod(int methodAccess, String methodName, String descriptor, String methodSignature,
                 String[] thrown) {
-            if ((methodAccess & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) == 0 || "<clinit>".equals(methodName)
+            if ((methodAccess & Opcodes.ACC_PUBLIC) == 0 || "<clinit>".equals(methodName)
                     || (methodAccess & (Opcodes.ACC_SYNTHETIC | Opcodes.ACC_BRIDGE)) != 0) {
                 return null;
             }
@@ -201,9 +201,11 @@ public final class AsmApiScanner {
                     component.name, component.descriptor, component.signature, component.annotations)).toList();
             List<ApiField> apiFields = fields.stream().map(field -> new ApiField(field.name, field.descriptor,
                     field.signature, field.access, field.constant, field.deprecated, field.annotations)).toList();
-            List<ApiMethod> apiMethods = methods.stream().map(method -> new ApiMethod(method.name, method.descriptor,
-                    method.signature, method.access, method.deprecated, method.varargs, method.defaultMethod,
-                    method.parameterNames, method.exceptions, method.annotations)).toList();
+            List<ApiMethod> apiMethods = methods.stream()
+                    .filter(method -> (access & Opcodes.ACC_ABSTRACT) == 0 || !"<init>".equals(method.name))
+                    .map(method -> new ApiMethod(method.name, method.descriptor,
+                            method.signature, method.access, method.deprecated, method.varargs, method.defaultMethod,
+                            method.parameterNames, method.exceptions, method.annotations)).toList();
             return new ApiType(name, signature, superName, interfaces, access, (access & Opcodes.ACC_RECORD) != 0,
                     (access & Opcodes.ACC_ENUM) != 0, (access & Opcodes.ACC_ANNOTATION) != 0, false,
                     (access & Opcodes.ACC_DEPRECATED) != 0, annotations, apiComponents, apiFields, apiMethods);

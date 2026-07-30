@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import dev.shamoo.runtime.core.InvocationAdmission;
+import dev.shamoo.runtime.core.InvocationController;
+import dev.shamoo.runtime.core.InvocationRejectedError;
+import dev.shamoo.runtime.core.InvocationSnapshot;
 import dev.shamoo.runtime.core.PlatformOperationResult;
 import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.core.ResourceRegistry;
@@ -211,6 +214,134 @@ class JavetPluginRuntimeFactoryCallbackTest {
         assertTrue(resources.cleanup(owner).clean());
         assertEquals(0, resources.size());
         assertTrue(closed.get());
+    }
+
+    @Test
+    void directHostBindingConditionallyLeasesOpenAdmissionUntilAsyncSettlement() throws Exception {
+        PluginId owner = new PluginId("fixture");
+        InvocationAdmission admission = new InvocationAdmission(owner);
+        ResourceRegistry resources = new ResourceRegistry();
+        CompletableFuture<Object> pending = new CompletableFuture<>();
+        HostFunction binding = JavetPluginRuntimeFactory.managedHostBinding(
+                ignored -> pending, resources, owner, "managed", admission);
+
+        Object lifecycleResult = binding.invoke(List.of());
+        assertEquals(0, admission.snapshot().active());
+        pending.complete("initialized");
+        assertEquals("initialized", assertInstanceOf(CompletionStage.class, lifecycleResult)
+                .toCompletableFuture().join());
+
+        CompletableFuture<Object> admittedPending = new CompletableFuture<>();
+        admission.open();
+        HostFunction admittedBinding = JavetPluginRuntimeFactory.managedHostBinding(
+                ignored -> admittedPending, resources, owner, "managed", admission);
+        Object admittedResult = admittedBinding.invoke(List.of());
+        assertEquals(1, admission.snapshot().active());
+        admission.stop();
+        CompletionStage<Void> drained = admission.awaitDrained(Duration.ofSeconds(1));
+        assertFalse(drained.toCompletableFuture().isDone());
+
+        admittedPending.complete("ready");
+        assertEquals("ready", assertInstanceOf(CompletionStage.class, admittedResult).toCompletableFuture().join());
+        drained.toCompletableFuture().join();
+        assertEquals(0, admission.snapshot().active());
+    }
+
+    @Test
+    void directHostBindingPropagatesCapturedAdmissionUntilLeaseCloses() throws Exception {
+        PluginId owner = new PluginId("fixture");
+        InvocationAdmission admission = new InvocationAdmission(owner);
+        CompletableFuture<Object> pending = new CompletableFuture<>();
+        AtomicBoolean capturedAdmission = new AtomicBoolean();
+        HostFunction target = new HostFunction() {
+            @Override
+            public Object invoke(List<Object> arguments) {
+                throw new AssertionError("managed wrapper must invoke the admission-aware method");
+            }
+
+            @Override
+            public Object invoke(List<Object> arguments, boolean admitted) {
+                capturedAdmission.set(admitted);
+                return pending;
+            }
+        };
+        admission.open();
+        HostFunction binding = JavetPluginRuntimeFactory.managedHostBinding(
+                target, new ResourceRegistry(), owner, "managed", admission);
+
+        CompletionStage<?> result = assertInstanceOf(CompletionStage.class, binding.invoke(List.of()));
+        assertTrue(capturedAdmission.get());
+        assertEquals(1, admission.snapshot().active());
+        admission.stop();
+        CompletionStage<Void> drained = admission.awaitDrained(Duration.ofSeconds(1));
+        assertFalse(drained.toCompletableFuture().isDone());
+
+        pending.complete("settled");
+        assertEquals("settled", result.toCompletableFuture().join());
+        drained.toCompletableFuture().join();
+        assertEquals(0, admission.snapshot().active());
+        assertEquals(1, admission.snapshot().completed());
+    }
+
+    @Test
+    void directHostBindingReleasesAdmissionAfterSynchronousFailure() {
+        PluginId owner = new PluginId("fixture");
+        InvocationAdmission admission = new InvocationAdmission(owner);
+        admission.open();
+        HostFunction binding = JavetPluginRuntimeFactory.managedHostBinding(ignored -> {
+            throw new IllegalStateException("failed");
+        }, new ResourceRegistry(), owner, "managed", admission);
+
+        assertThrows(IllegalStateException.class, () -> binding.invoke(List.of()));
+        assertEquals(0, admission.snapshot().active());
+        assertEquals(1, admission.snapshot().completed());
+    }
+
+    @Test
+    void directHostBindingReturnsFailedStageWhenAdmissionClosesBetweenSnapshotAndAdmit() throws Exception {
+        PluginId owner = new PluginId("fixture");
+        AtomicBoolean invoked = new AtomicBoolean();
+        InvocationController racing = new InvocationController() {
+            @Override
+            public InvocationAdmission.Lease admit() {
+                throw new InvocationRejectedError(owner);
+            }
+
+            @Override
+            public InvocationSnapshot snapshot() {
+                return new InvocationSnapshot(true, 0, 0, 0, 0);
+            }
+        };
+        HostFunction binding = JavetPluginRuntimeFactory.managedHostBinding(ignored -> {
+            invoked.set(true);
+            return true;
+        }, new ResourceRegistry(), owner, "managed", racing);
+
+        CompletionStage<?> result = assertInstanceOf(CompletionStage.class, binding.invoke(List.of()));
+
+        assertThrows(java.util.concurrent.CompletionException.class, () -> result.toCompletableFuture().join());
+        assertFalse(invoked.get());
+    }
+
+    @Test
+    void directHostBindingAllowsAdmissionClosedLifecycleHooksWithoutLeases() throws Exception {
+        PluginId owner = new PluginId("fixture");
+        InvocationAdmission admission = new InvocationAdmission(owner);
+        AtomicInteger invokes = new AtomicInteger();
+        HostFunction binding = JavetPluginRuntimeFactory.managedHostBinding(ignored -> {
+            invokes.incrementAndGet();
+            return CompletableFuture.completedFuture("initialized");
+        }, new ResourceRegistry(), owner, "managed", admission);
+
+        assertEquals("initialized", assertInstanceOf(CompletionStage.class, binding.invoke(List.of()))
+                .toCompletableFuture().join());
+        admission.open();
+        admission.stop();
+        CompletionStage<?> unload = assertInstanceOf(CompletionStage.class, binding.invoke(List.of()));
+
+        assertEquals("initialized", unload.toCompletableFuture().join());
+        assertEquals(2, invokes.get());
+        assertEquals(0, admission.snapshot().active());
     }
 
     @Test

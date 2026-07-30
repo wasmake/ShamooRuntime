@@ -38,6 +38,7 @@ class AsmApiScannerTest {
         assertTrue(type.record());
         assertTrue(type.methods().stream().anyMatch(method -> method.varargs()
                 && method.exceptions().contains("java/io/IOException")));
+        assertTrue(type.methods().stream().noneMatch(method -> "hidden".equals(method.name())));
     }
 
     @Test
@@ -72,6 +73,10 @@ class AsmApiScannerTest {
             if (values.length == 0) {
                 throw new IOException("empty");
             }
+        }
+
+        protected void hidden() {
+            // Protected implementation details are not script-callable API.
         }
     }
 

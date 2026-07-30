@@ -8,6 +8,8 @@ import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
 import dev.shamoo.runtime.javet.JavetPluginHost;
+import dev.shamoo.runtime.javet.HostFunction;
+import dev.shamoo.runtime.javet.PluginTextFileStore;
 import dev.shamoo.runtime.protocol.CompatibilityInput;
 import dev.shamoo.runtime.protocol.PlatformKind;
 import dev.shamoo.runtime.protocol.ProtocolVersion;
@@ -18,6 +20,7 @@ import dev.shamoo.runtime.protocol.VersionParser;
 import dev.shamoo.runtime.platform.velocity.GeneratedVelocityEventRegistry;
 import dev.shamoo.runtime.platform.velocity.VelocityEventBridge;
 import dev.shamoo.runtime.core.PluginId;
+import dev.shamoo.runtime.core.PluginRuntimeContext;
 import dev.shamoo.runtime.core.ResourceRegistry;
 import dev.shamoo.runtime.core.PlatformCapabilities;
 import dev.shamoo.runtime.core.ScriptCallback;
@@ -70,7 +73,7 @@ public final class ShamooVelocityPlugin {
         }
         pluginHost = new JavetPluginHost(directory, compatibility(), platformCapabilities(),
                 Duration.ofMillis(200), Duration.ofSeconds(5),
-                context -> Map.of(), System.getLogger(getClass().getName()));
+                this::customBindings, System.getLogger(getClass().getName()));
         VelocityRuntimeCommands.register(server, this, commandBridge, pluginHost::pluginStatuses,
                 System.getLogger(getClass().getName()));
         pluginHost.startAsync(Duration.ofMillis(500)).whenComplete((ignored, failure) -> {
@@ -95,6 +98,25 @@ public final class ShamooVelocityPlugin {
         return new CompatibilityInput(PlatformKind.VELOCITY, null, null, velocity,
                 Set.of(RuntimeCapability.NODE_BUILTINS, RuntimeCapability.FILESYSTEM_READ,
                         RuntimeCapability.FILESYSTEM_WRITE), runtime, runtime, ProtocolVersion.CURRENT);
+    }
+
+    private Map<String, HostFunction> customBindings(PluginRuntimeContext context) {
+        PluginId owner = context.candidate().pluginId();
+        try {
+            PluginTextFileStore files = new PluginTextFileStore(
+                    dataDirectory.resolve("plugin-data").resolve(owner.value()),
+                    context.candidate().root(),
+                    context.candidate().descriptor().node().filesystem().read(),
+                    context.candidate().descriptor().node().filesystem().write());
+            return Map.of(
+                    "shamooReadTextFile", arguments -> files.read(string(arguments, 0)),
+                    "shamooWriteTextFile", arguments -> {
+                        files.write(string(arguments, 0), string(arguments, 1));
+                        return null;
+                    });
+        } catch (IOException exception) {
+            throw new IllegalStateException("unable to initialize plugin text storage for " + owner, exception);
+        }
     }
 
     private PlatformCapabilities platformCapabilities() {

@@ -23,7 +23,8 @@ public final class ApiCoverageVerifierCli {
     private static final int MINIMUM_ARGUMENTS = 4;
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Set<String> PAPER_PACKAGES = Set.of(
-            "org.bukkit.", "io.papermc.paper.", "com.destroystokyo.paper.", "net.kyori.adventure.");
+            "org.bukkit.", "org.spigotmc.", "io.papermc.paper.", "com.destroystokyo.paper.",
+            "net.kyori.adventure.", "net.md_5.bungee.api.");
     private static final Set<String> VELOCITY_PACKAGES = Set.of(
             "com.velocitypowered.api.", "net.kyori.adventure.");
 
@@ -74,12 +75,16 @@ public final class ApiCoverageVerifierCli {
         require(platform.equals(coverage.path("platform").asText()), "coverage platform does not match task");
         JsonNode declarations = model.path("declarations");
         Set<String> emittedTypes = new HashSet<>();
-        long emittedMembers = 0;
+        Set<String> emittedMemberIds = new HashSet<>();
         long emittedExceptions = 0;
         for (JsonNode declaration : declarations) {
-            emittedTypes.add(declaration.path("javaName").asText());
-            for (String memberGroup : List.of("constructors", "methods", "fields", "enumConstants")) {
-                emittedMembers += declaration.path(memberGroup).size();
+            String owner = declaration.path("javaName").asText();
+            emittedTypes.add(owner);
+            for (String memberGroup : List.of("constructors", "methods", "fields")) {
+                declaration.path(memberGroup).forEach(member -> emittedMemberIds.add(member.path("id").asText()));
+            }
+            for (JsonNode constant : declaration.path("enumConstants")) {
+                emittedMemberIds.add(owner + "#" + constant.asText() + ":L" + owner.replace('.', '/') + ";");
             }
             for (String callableGroup : List.of("constructors", "methods")) {
                 for (JsonNode callable : declaration.path(callableGroup)) {
@@ -89,7 +94,10 @@ public final class ApiCoverageVerifierCli {
         }
         require(emittedTypes.equals(classes.keySet()), difference(classes.keySet(), emittedTypes));
 
-        long expectedMembers = classes.values().stream().mapToLong(ClassInventory::members).sum();
+        Set<String> expectedMemberIds = classes.values().stream().flatMap(value -> value.members().stream())
+                .collect(java.util.stream.Collectors.toSet());
+        require(emittedMemberIds.equals(expectedMemberIds), "member inventory differs: "
+                + difference(expectedMemberIds, emittedMemberIds));
         long expectedExceptions = classes.values().stream().mapToLong(ClassInventory::exceptions).sum();
         Set<String> expectedEvents = events(platform, classes);
         Set<String> emittedEvents = new HashSet<>();
@@ -98,7 +106,7 @@ public final class ApiCoverageVerifierCli {
                 emittedEvents));
 
         verifyCoverage(coverage, "declarations", classes.size(), declarations.size());
-        verifyCoverage(coverage, "members", expectedMembers, emittedMembers);
+        verifyCoverage(coverage, "members", expectedMemberIds.size(), emittedMemberIds.size());
         verifyCoverage(coverage, "events", expectedEvents.size(), emittedEvents.size());
         verifyCoverage(coverage, "exceptions", expectedExceptions, emittedExceptions);
     }
@@ -150,14 +158,14 @@ public final class ApiCoverageVerifierCli {
         }
     }
 
-    private record ClassInventory(String name, String superName, int access, long members, long exceptions) {
+    private record ClassInventory(String name, String superName, int access, Set<String> members, long exceptions) {
     }
 
     private static final class InventoryVisitor extends ClassVisitor {
         private String name;
         private String superName;
         private int access;
-        private long members;
+        private final Set<String> members = new HashSet<>();
         private long exceptions;
 
         private InventoryVisitor() {
@@ -175,9 +183,9 @@ public final class ApiCoverageVerifierCli {
         @Override
         public FieldVisitor visitField(int fieldAccess, String fieldName, String descriptor, String signature,
                 Object value) {
-            if ((fieldAccess & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) != 0
+            if ((fieldAccess & Opcodes.ACC_PUBLIC) != 0
                     && (fieldAccess & Opcodes.ACC_SYNTHETIC) == 0) {
-                members++;
+                members.add(name + "#" + fieldName + ":" + descriptor);
             }
             return null;
         }
@@ -185,10 +193,11 @@ public final class ApiCoverageVerifierCli {
         @Override
         public MethodVisitor visitMethod(int methodAccess, String methodName, String descriptor, String signature,
                 String[] thrown) {
-            if ((methodAccess & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PROTECTED)) != 0
+            if ((methodAccess & Opcodes.ACC_PUBLIC) != 0
                     && (methodAccess & (Opcodes.ACC_SYNTHETIC | Opcodes.ACC_BRIDGE)) == 0
-                    && !"<clinit>".equals(methodName)) {
-                members++;
+                    && !"<clinit>".equals(methodName)
+                    && ((access & Opcodes.ACC_ABSTRACT) == 0 || !"<init>".equals(methodName))) {
+                members.add(name + "#" + methodName + descriptor);
                 exceptions += thrown == null ? 0 : thrown.length;
             }
             return null;
@@ -198,7 +207,7 @@ public final class ApiCoverageVerifierCli {
             if (name == null || (access & Opcodes.ACC_PUBLIC) == 0 || (access & Opcodes.ACC_SYNTHETIC) != 0) {
                 return null;
             }
-            return new ClassInventory(name, superName, access, members, exceptions);
+            return new ClassInventory(name, superName, access, Set.copyOf(members), exceptions);
         }
     }
 }

@@ -6,4 +6,8 @@ import java.util.List;
 @FunctionalInterface
 public interface HostFunction {
     Object invoke(List<Object> arguments) throws Exception;
+
+    default Object invoke(List<Object> arguments, boolean admitted) throws Exception {
+        return invoke(arguments);
+    }
 }

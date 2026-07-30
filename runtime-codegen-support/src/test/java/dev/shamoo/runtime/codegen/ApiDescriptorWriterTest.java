@@ -53,6 +53,12 @@ class ApiDescriptorWriterTest {
         assertTrue(declaration.has("constructors"));
         assertTrue(declaration.has("methods"));
         assertFalse(declaration.has("signature"));
+        JsonNode constructor = declaration.required("constructors").get(0);
+        assertTrue(constructor.required("id").textValue().contains("#<init>"));
+        assertTrue(constructor.required("descriptor").textValue().startsWith("("));
+        JsonNode method = declaration.required("methods").get(0);
+        assertTrue(method.required("id").textValue().contains("#"));
+        assertTrue(method.required("descriptor").textValue().startsWith("("));
     }
 
     @Test

@@ -7,8 +7,8 @@
     "percent" : 100
   },
   "members" : {
-    "expected" : 63672,
-    "emitted" : 63672,
+    "expected" : 57844,
+    "emitted" : 57844,
     "percent" : 100
   },
   "events" : {
@@ -17,8 +17,8 @@
     "percent" : 100
   },
   "exceptions" : {
-    "expected" : 532,
-    "emitted" : 532,
+    "expected" : 507,
+    "emitted" : 507,
     "percent" : 100
   },
   "packets" : {

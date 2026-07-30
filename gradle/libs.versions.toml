@@ -32,6 +32,7 @@ jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", ver
 semver4j = { module = "org.semver4j:semver4j", version.ref = "semver4j" }
 asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
 paper-adventure-api = { module = "net.kyori:adventure-api", version.ref = "paper-adventure" }
+paper-adventure-minimessage = { module = "net.kyori:adventure-text-minimessage", version.ref = "paper-adventure" }
 velocity-adventure-api = { module = "net.kyori:adventure-api", version.ref = "velocity-adventure" }
 netty-transport = { module = "io.netty:netty-transport", version.ref = "netty" }
 

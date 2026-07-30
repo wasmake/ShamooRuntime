@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.shamoo.runtime.core.PlatformCapabilities;
+import dev.shamoo.runtime.core.PlatformOperationResult;
 import dev.shamoo.runtime.core.PluginId;
 import dev.shamoo.runtime.protocol.CompatibilityInput;
 import dev.shamoo.runtime.protocol.PlatformKind;
@@ -20,6 +21,7 @@ import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 @SuppressWarnings({"PMD.UnitTestAssertionsShouldIncludeMessage", "PMD.UnitTestContainsTooManyAsserts",
         "PMD.AvoidDuplicateLiterals"})
 class JavetPluginHostTest {
+    private static final int FIRST_REQUEST_COUNT = 1;
     @TempDir
     Path plugins;
 
@@ -67,6 +70,68 @@ class JavetPluginHostTest {
 
             assertEquals(List.of("first-start", "first-end", "second-start"), events);
             assertThrows(IllegalStateException.class, () -> host.startAsync(Duration.ofSeconds(30)));
+        }
+    }
+
+    @Test
+    void managesAsyncBootstrapBindingResourcesWithoutCompilerMetadataAndRollsBackFailedGeneration()
+            throws Exception {
+        List<String> events = new CopyOnWriteArrayList<>();
+        List<List<Object>> requests = new CopyOnWriteArrayList<>();
+        AtomicInteger closes = new AtomicInteger();
+        CompletableFuture<PlatformOperationResult<Map<String, Object>>> firstRegistration = new CompletableFuture<>();
+        Path managed = plugin("managed-binding",
+                "{\"required\":{},\"optional\":{},\"loadBefore\":[],\"loadAfter\":[]}", """
+                export async function load() {
+                  const result = await host.customBinding({world: 'spawn'});
+                  host.record(result.status + ':' + result.world);
+                }
+                """);
+        SemanticVersion runtime = new SemanticVersion("0.1.0");
+        CompatibilityInput input = new CompatibilityInput(PlatformKind.PAPER,
+                new SemanticVersion("1.21.8"), new SemanticVersion("1.21.8"), null,
+                Set.of(), runtime, runtime, ProtocolVersion.CURRENT);
+        try (JavetPluginHost host = new JavetPluginHost(plugins, input, PlatformCapabilities.NONE, Duration.ZERO,
+                Duration.ofSeconds(3), context -> Map.of(
+                        "customBinding", arguments -> {
+                            requests.add(List.copyOf(arguments));
+                            if (requests.size() == FIRST_REQUEST_COUNT) {
+                                return firstRegistration;
+                            }
+                            return CompletableFuture.completedFuture(PlatformOperationResult.owned(
+                                    Map.of("status", "managed", "world", "failed"), closes::incrementAndGet));
+                        },
+                        "record", arguments -> {
+                            events.add(String.valueOf(arguments.getFirst()));
+                            return true;
+                        }), System.getLogger(getClass().getName()))) {
+            var startup = host.startAsync(Duration.ofSeconds(30));
+            await(() -> !requests.isEmpty());
+
+            assertFalse(startup.toCompletableFuture().isDone());
+            assertEquals(List.of(Map.of("world", "spawn")), requests.getFirst());
+            firstRegistration.complete(PlatformOperationResult.owned(
+                    Map.of("status", "managed", "world", "spawn"), closes::incrementAndGet));
+            startup.toCompletableFuture().join();
+
+            assertEquals(List.of("managed:spawn"), events);
+            assertEquals(1, host.snapshots().getFirst().resources().size());
+            Files.writeString(managed.resolve("index.js"), """
+                    export async function load() {
+                      await host.customBinding({world: 'failed'});
+                    }
+                    export function ready() { throw new Error('candidate failed'); }
+                    """);
+
+            assertThrows(CompletionException.class,
+                    () -> host.reload(new PluginId("managed-binding")).toCompletableFuture().join());
+            assertEquals(List.of(Map.of("world", "failed")), requests.get(1));
+            assertEquals(1, closes.get());
+            assertEquals(1, host.snapshots().getFirst().resources().size());
+
+            host.disable(new PluginId("managed-binding")).toCompletableFuture().join();
+            host.unload(new PluginId("managed-binding")).toCompletableFuture().join();
+            assertEquals(2, closes.get());
         }
     }
 
