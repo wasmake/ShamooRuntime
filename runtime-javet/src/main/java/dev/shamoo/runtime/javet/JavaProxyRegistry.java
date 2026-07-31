@@ -180,24 +180,28 @@ public final class JavaProxyRegistry implements AutoCloseable {
         if (visited.put(value, Boolean.TRUE) != null) {
             throw new IllegalArgumentException(boundary + " must not contain cycles");
         }
-        if (value instanceof List<?> list) {
-            List<Object> safe = new ArrayList<>(list.size());
-            for (Object item : list) {
-                safe.add(requireDataValue(item, boundary, visited));
-            }
-            return java.util.Collections.unmodifiableList(safe);
-        }
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> safe = new LinkedHashMap<>();
-            map.forEach((key, item) -> {
-                if (!(key instanceof String text)) {
-                    throw new IllegalArgumentException(boundary + " map keys must be strings");
+        try {
+            if (value instanceof List<?> list) {
+                List<Object> safe = new ArrayList<>(list.size());
+                for (Object item : list) {
+                    safe.add(requireDataValue(item, boundary, visited));
                 }
-                safe.put(text, requireDataValue(item, boundary, visited));
-            });
-            return java.util.Collections.unmodifiableMap(safe);
+                return java.util.Collections.unmodifiableList(safe);
+            }
+            if (value instanceof Map<?, ?> map) {
+                Map<String, Object> safe = new LinkedHashMap<>();
+                map.forEach((key, item) -> {
+                    if (!(key instanceof String text)) {
+                        throw new IllegalArgumentException(boundary + " map keys must be strings");
+                    }
+                    safe.put(text, requireDataValue(item, boundary, visited));
+                });
+                return java.util.Collections.unmodifiableMap(safe);
+            }
+            throw new IllegalArgumentException(boundary + " must contain only immutable data values");
+        } finally {
+            visited.remove(value);
         }
-        throw new IllegalArgumentException(boundary + " must contain only immutable data values");
     }
 
     static Object requireDataValue(Object value, String boundary) {
