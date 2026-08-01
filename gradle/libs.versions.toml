@@ -15,7 +15,7 @@ spotbugs-plugin = "6.5.9"
 asm = "9.8"
 netty = "4.1.118.Final"
 paperweight = "2.0.0-beta.21"
-jackson = "2.20.1"
+jackson = "2.22.1"
 semver4j = "6.0.0"
 
 [libraries]
