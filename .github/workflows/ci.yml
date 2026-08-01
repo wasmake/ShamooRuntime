@@ -66,7 +66,7 @@ jobs:
           java-version: '21'
           cache: gradle
       - name: Cache immutable server downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: integration-*/build/runtime-server/*.jar
           key: runtime-servers-paper-1.21.8-55-velocity-3.4.0-566
