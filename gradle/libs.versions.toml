@@ -1,6 +1,6 @@
 [versions]
 java = "21"
-javet = "5.0.9"
+javet = "5.0.10"
 swc4j = "2.1.0"
 paper = "1.21.8-R0.1-20250906.215025-55"
 velocity = "3.4.0"
